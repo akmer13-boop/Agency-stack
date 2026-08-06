@@ -11,10 +11,14 @@ TEST_AGENT_TOKEN = "test-agent-token"
 @pytest.fixture
 def configured_settings() -> Settings:
     return Settings(
+        _env_file=None,
         environment="test",
+        app_version="0.2.0",
         openai_api_key="test-openai-key",
         agent_api_token=TEST_AGENT_TOKEN,
         openai_tracing_enabled=False,
+        telegram_bot_token="",
+        telegram_allowed_user_ids="",
         allow_crm_write=False,
     )
 
@@ -54,9 +58,13 @@ def test_agent_endpoint_rejects_missing_bearer_token(client: TestClient) -> None
 
 def test_agent_endpoint_rejects_missing_openai_key() -> None:
     settings = Settings(
+        _env_file=None,
         environment="test",
+        app_version="0.2.0",
         openai_api_key="",
         agent_api_token=TEST_AGENT_TOKEN,
+        telegram_bot_token="",
+        telegram_allowed_user_ids="",
     )
     app.dependency_overrides[get_settings] = lambda: settings
 
