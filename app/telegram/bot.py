@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from app.config import get_settings
 from app.observability import configure_logging
 from app.runtime import configure_openai_runtime
+from app.storage.conversation_store import ConversationStore
 from app.telegram.handlers import router
 from app.telegram.rate_limit import UserRateLimiter
 
@@ -27,17 +28,30 @@ async def run_telegram_bot() -> None:
 
     configure_openai_runtime(settings)
 
+    conversation_store = ConversationStore(
+        settings.database_path,
+        settings.conversation_history_limit,
+    )
+    await conversation_store.initialize()
+
     bot = Bot(token=settings.telegram_bot_token)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
     rate_limiter = UserRateLimiter(settings.telegram_request_cooldown_seconds)
 
     await bot.delete_webhook(drop_pending_updates=False)
-    logger.info("Starting Telegram polling", extra={"event": "telegram_polling_start"})
+    logger.info(
+        "Starting Telegram polling",
+        extra={
+            "event": "telegram_polling_start",
+            "database_path": settings.database_path,
+        },
+    )
     await dispatcher.start_polling(
         bot,
         settings=settings,
         rate_limiter=rate_limiter,
+        conversation_store=conversation_store,
         polling_timeout=settings.telegram_polling_timeout_seconds,
         tasks_concurrency_limit=8,
         allowed_updates=dispatcher.resolve_used_update_types(),
