@@ -2,7 +2,7 @@ import logging
 import secrets
 import time
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 from agents import Runner, set_default_openai_key, set_tracing_disabled
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -27,6 +27,8 @@ from app.observability import (
 configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
+SettingsDependency = Annotated[Settings, Depends(get_settings)]
+AuthorizationHeader = Annotated[str | None, Header()]
 
 if settings.openai_api_key:
     set_default_openai_key(settings.openai_api_key)
@@ -72,8 +74,8 @@ async def add_correlation_id(request: Request, call_next):
 
 
 def authorize(
-    authorization: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings),
+    settings: SettingsDependency,
+    authorization: AuthorizationHeader = None,
 ) -> None:
     if not settings.agent_api_token:
         raise HTTPException(
@@ -87,7 +89,7 @@ def authorize(
 
 
 @app.get("/health")
-async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | bool]:
+async def health(settings: SettingsDependency) -> dict[str, str | bool]:
     return {
         "status": "ok",
         "environment": settings.environment,
@@ -104,7 +106,7 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | 
 )
 async def run_agent(
     request: AgentRequest,
-    settings: Settings = Depends(get_settings),
+    settings: SettingsDependency,
 ) -> AgentResponse:
     if not settings.openai_api_key:
         raise HTTPException(
