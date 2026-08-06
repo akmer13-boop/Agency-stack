@@ -6,7 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN groupadd --system agency && useradd --system --gid agency agency
+RUN groupadd --system agency && \
+    useradd --system --gid agency agency && \
+    mkdir -p /data && \
+    chown agency:agency /data
 
 COPY pyproject.toml README.md ./
 COPY app ./app

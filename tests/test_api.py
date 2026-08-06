@@ -1,10 +1,9 @@
-from types import SimpleNamespace
-
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings, get_settings
-from app.main import Runner, app
+from app.main import app
+from app.services.agent_runner import AgentRunResult
 
 TEST_AGENT_TOKEN = "test-agent-token"
 
@@ -12,10 +11,14 @@ TEST_AGENT_TOKEN = "test-agent-token"
 @pytest.fixture
 def configured_settings() -> Settings:
     return Settings(
+        _env_file=None,
         environment="test",
+        app_version="0.2.1",
         openai_api_key="test-openai-key",
         agent_api_token=TEST_AGENT_TOKEN,
         openai_tracing_enabled=False,
+        telegram_bot_token="",
+        telegram_allowed_user_ids="",
         allow_crm_write=False,
     )
 
@@ -35,8 +38,9 @@ def test_health_reports_safe_runtime_state(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "environment": "test",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "openai_configured": True,
+        "telegram_configured": False,
         "crm_write_enabled": False,
     }
     assert response.headers["X-Correlation-ID"]
@@ -54,9 +58,13 @@ def test_agent_endpoint_rejects_missing_bearer_token(client: TestClient) -> None
 
 def test_agent_endpoint_rejects_missing_openai_key() -> None:
     settings = Settings(
+        _env_file=None,
         environment="test",
+        app_version="0.2.1",
         openai_api_key="",
         agent_api_token=TEST_AGENT_TOKEN,
+        telegram_bot_token="",
+        telegram_allowed_user_ids="",
     )
     app.dependency_overrides[get_settings] = lambda: settings
 
@@ -78,13 +86,13 @@ def test_agent_endpoint_returns_structured_response(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_run(**_kwargs):
-        return SimpleNamespace(
-            final_output="Оркестратор работает",
-            last_agent=SimpleNamespace(name="Agency Stack Orchestrator"),
+    async def fake_execute_agent(_message: str, _settings: Settings) -> AgentRunResult:
+        return AgentRunResult(
+            answer="Оркестратор работает",
+            agent="Agency Stack Orchestrator",
         )
 
-    monkeypatch.setattr(Runner, "run", fake_run)
+    monkeypatch.setattr("app.main.execute_agent", fake_execute_agent)
 
     correlation_id = "test-run-123"
     response = client.post(

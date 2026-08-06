@@ -2,91 +2,130 @@
 
 Корпоративная платформа ИИ-агентов для туристической компании.
 
-## Цель
-
-Единый backend на Python/FastAPI с OpenAI Agents SDK, Telegram как пользовательским интерфейсом и контролируемой интеграцией с коробочным Bitrix24.
-
 ## Текущий статус
 
-Stage 1 реализует безопасный технический фундамент:
+### Stage 1
 
-- FastAPI backend;
-- OpenAI Agents SDK;
-- первый агент-оркестратор;
-- Bearer-авторизация внутреннего API;
-- запрет записи в CRM по умолчанию;
-- correlation ID для каждого запроса;
-- структурированные JSON-логи;
-- безопасная обработка ошибок OpenAI;
-- автотесты, Ruff и GitHub Actions;
-- Dockerfile, Docker Compose и health-check контейнера.
+Безопасный FastAPI-фундамент, OpenAI Agents SDK, Bearer-авторизация, логи, correlation ID, тесты и Docker.
 
-## Локальный запуск на macOS
+### Stage 2
+
+Рабочий Telegram-бот через long polling с allowlist по Telegram user ID.
+
+### Stage 2.1 — пройдено
+
+Локальная приёмка на macOS подтверждена 2026-08-06.
+
+Реализованы и проверены:
+
+- роли: администратор, руководитель, сотрудник, наблюдатель;
+- специализированные агенты: ИИ-РОП, аналитик сделок, база знаний, техадминистратор;
+- автоматическая маршрутизация запроса;
+- SQLite-память отдельно для каждого Telegram-пользователя;
+- команды `/help`, `/status`, `/reset`;
+- локальный аудит технических событий;
+- постоянный Docker volume для SQLite;
+- запрет попадания локальной базы и WAL/SHM-файлов в Git.
+
+Подробный результат: [`docs/stage-2.1-status.md`](docs/stage-2.1-status.md).
+
+### Stage 3 — начат
+
+Создана ветка `stage-3-bitrix-readonly` для подключения коробочного Bitrix24 строго в режиме чтения.
+
+Запись в CRM остаётся запрещённой.
+
+## Локальная настройка на macOS
 
 ```bash
-git switch stage-1-foundation
-git pull origin stage-1-foundation
-chmod +x scripts/setup-local.sh scripts/test-agent.sh
-./scripts/setup-local.sh
+git switch stage-2-telegram
+git pull --ff-only origin stage-2-telegram
+./.venv/bin/python -m pip install -e '.[dev]'
 nano .env
-./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-В другом Terminal:
+Основные настройки `.env`:
+
+```env
+APP_VERSION=0.2.1
+OPENAI_API_KEY=
+TELEGRAM_BOT_TOKEN=
+
+# Пользователи без отдельной роли получают роль «Сотрудник»
+TELEGRAM_ALLOWED_USER_IDS=123456789
+
+# Ролевые списки одновременно дают доступ к боту
+TELEGRAM_ADMIN_USER_IDS=
+TELEGRAM_MANAGER_USER_IDS=
+TELEGRAM_OBSERVER_USER_IDS=
+
+DATABASE_PATH=data/agency_stack.db
+CONVERSATION_HISTORY_LIMIT=12
+OPENAI_TRACING_ENABLED=false
+ALLOW_CRM_WRITE=false
+```
+
+Для назначения владельца бота руководителем:
+
+```env
+TELEGRAM_MANAGER_USER_IDS=123456789
+```
+
+## Запуск Telegram-бота
 
 ```bash
-./scripts/test-agent.sh
+bash scripts/run-telegram.sh
 ```
 
-## Локальный запуск на Windows
+Команды:
 
-```powershell
-git switch stage-1-foundation
-git pull origin stage-1-foundation
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
-notepad .env
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```text
+/start   — главное меню
+/help    — помощь
+/status  — версия, роль и размер памяти
+/reset   — очистить память текущего пользователя
+/id      — показать Telegram ID
+```
+
+## Запуск API
+
+```bash
+./.venv/bin/python -m uvicorn app.main:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --reload
 ```
 
 ## Проверки
 
 ```bash
-ruff check .
-pytest -q
+./.venv/bin/ruff check .
+./.venv/bin/pytest -q
 ```
 
 ## Docker
 
-Сборка и запуск одной командой:
+API:
 
 ```bash
 docker compose up --build
 ```
 
-Либо вручную:
+API и Telegram worker:
 
 ```bash
-docker build -t agency-stack:local .
-docker run --rm \
-  --env-file .env \
-  -p 8000:8000 \
-  agency-stack:local
+docker compose --profile telegram up --build
 ```
-
-После запуска:
-
-- health-check: `http://127.0.0.1:8000/health`;
-- Swagger: `http://127.0.0.1:8000/docs`.
 
 ## План поставки
 
-- Stage 0 — архитектура, роли, безопасность и ограничения данных.
-- Stage 1 — технический каркас API и первый агент.
-- Stage 2 — Telegram-бот и авторизация сотрудников.
-- Stage 3 — Bitrix24 в режиме только чтения.
-- Stage 4 — ИИ-РОП и проверяемые аналитические ответы.
-- Stage 5+ — база знаний, подтверждаемые действия, QA звонков и автоматические отчёты.
+- Stage 0 — архитектура и ограничения безопасности.
+- Stage 1 — API-фундамент и первый агент.
+- Stage 2 — Telegram и авторизация.
+- Stage 2.1 — роли, память и специализированные агенты — **пройдено**.
+- Stage 3 — Bitrix24 только чтение — **начат**.
+- Stage 4 — полноценный ИИ-РОП и аналитика продаж.
 
-## Правило безопасности
+## Безопасность
 
-Секреты, токены, персональные данные и реальные клиентские выгрузки не коммитятся в Git. Все чувствительные значения задаются только через переменные окружения или секрет-хранилище. `.env` исключён из Git и Docker-контекста.
+Секреты, реальные Telegram ID, клиентские данные, `.env` и локальная SQLite-база не коммитятся в Git. Все чувствительные значения задаются только через переменные окружения или секрет-хранилище.

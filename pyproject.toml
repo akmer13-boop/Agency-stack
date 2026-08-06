@@ -4,11 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agency-stack"
-version = "0.1.0"
+version = "0.2.1"
 description = "Corporate multi-agent platform with Telegram and Bitrix24 integrations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "aiogram>=3.29,<4.0",
+  "aiosqlite>=0.21,<1.0",
   "fastapi>=0.116,<1.0",
   "uvicorn[standard]>=0.35,<1.0",
   "openai-agents>=0.2,<1.0",
@@ -22,6 +24,9 @@ dev = [
   "pytest-asyncio>=1.1,<2.0",
   "ruff>=0.12,<1.0",
 ]
+
+[project.scripts]
+agency-stack-telegram = "app.telegram.bot:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -39,4 +44,12 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
-known-third-party = ["agents", "fastapi", "openai", "pydantic", "pydantic_settings"]
+known-third-party = [
+  "agents",
+  "aiogram",
+  "aiosqlite",
+  "fastapi",
+  "openai",
+  "pydantic",
+  "pydantic_settings",
+]
