@@ -19,6 +19,8 @@ BITRIX24_READ_ONLY_METHODS: Final[frozenset[str]] = frozenset(
         "crm.deal.list",
         "crm.deal.fields",
         "crm.stagehistory.list",
+        "crm.lead.list",
+        "crm.lead.fields",
     }
 )
 
@@ -36,6 +38,26 @@ DEAL_ANALYTICS_FIELDS: Final[tuple[str, ...]] = (
     "CLOSEDATE",
     "CLOSED",
     "SOURCE_ID",
+)
+
+LEAD_DEMO_FIELDS: Final[tuple[str, ...]] = (
+    "ID",
+    "TITLE",
+    "STATUS_ID",
+    "STATUS_SEMANTIC_ID",
+    "SOURCE_ID",
+    "ASSIGNED_BY_ID",
+    "DATE_CREATE",
+    "DATE_MODIFY",
+    "OPPORTUNITY",
+    "CURRENCY_ID",
+)
+
+USER_DIRECTORY_FIELDS: Final[tuple[str, ...]] = (
+    "ID",
+    "NAME",
+    "LAST_NAME",
+    "ACTIVE",
 )
 
 
@@ -233,6 +255,16 @@ class Bitrix24ReadOnlyClient:
             raise Bitrix24RequestError("Bitrix24 returned an invalid profile")
         return result
 
+    async def list_users(self, *, max_items: int = 500) -> list[dict[str, Any]]:
+        return await self.call_all(
+            "user.get",
+            {
+                "filter": {"ACTIVE": "Y"},
+                "select": list(USER_DIRECTORY_FIELDS),
+            },
+            max_items=max_items,
+        )
+
     async def list_deal_categories(self) -> list[dict[str, Any]]:
         return await self.call_all(
             "crm.category.list",
@@ -265,6 +297,16 @@ class Bitrix24ReadOnlyClient:
             {
                 "select": list(DEAL_ANALYTICS_FIELDS),
                 "filter": filters,
+                "order": {"ID": "DESC"},
+            },
+            max_items=max_items,
+        )
+
+    async def list_leads(self, *, max_items: int = 200) -> list[dict[str, Any]]:
+        return await self.call_all(
+            "crm.lead.list",
+            {
+                "select": list(LEAD_DEMO_FIELDS),
                 "order": {"ID": "DESC"},
             },
             max_items=max_items,
