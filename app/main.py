@@ -1,8 +1,11 @@
 import logging
 import secrets
+import time
+import uuid
+from typing import Literal
 
 from agents import Runner, set_default_openai_key, set_tracing_disabled
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from openai import (
     APIConnectionError,
     APIStatusError,
@@ -14,8 +17,14 @@ from pydantic import BaseModel, Field
 
 from app.agents.orchestrator import orchestrator
 from app.config import Settings, get_settings
+from app.observability import (
+    configure_logging,
+    correlation_id_var,
+    get_correlation_id,
+)
 
 
+configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
@@ -32,8 +41,34 @@ class AgentRequest(BaseModel):
 
 
 class AgentResponse(BaseModel):
+    run_id: str
+    status: Literal["completed"]
     answer: str
     agent: str
+
+
+@app.middleware("http")
+async def add_correlation_id(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    token = correlation_id_var.set(correlation_id)
+    started_at = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+        response.headers["X-Correlation-ID"] = correlation_id
+        logger.info(
+            "HTTP request completed",
+            extra={
+                "event": "http_request",
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        return response
+    finally:
+        correlation_id_var.reset(token)
 
 
 def authorize(
@@ -56,6 +91,8 @@ async def health(settings: Settings = Depends(get_settings)) -> dict[str, str | 
     return {
         "status": "ok",
         "environment": settings.environment,
+        "version": settings.app_version,
+        "openai_configured": bool(settings.openai_api_key),
         "crm_write_enabled": settings.allow_crm_write,
     }
 
@@ -82,14 +119,18 @@ async def run_agent(
             max_turns=settings.agent_max_turns,
         )
     except AuthenticationError as exc:
-        logger.warning("OpenAI authentication failed")
+        logger.warning("OpenAI authentication failed", extra={"event": "openai_error"})
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="OpenAI rejected the configured API credentials",
         ) from exc
     except PermissionDeniedError as exc:
         error_code = getattr(exc, "code", None)
-        logger.warning("OpenAI permission denied: code=%s", error_code)
+        logger.warning(
+            "OpenAI permission denied: code=%s",
+            error_code,
+            extra={"event": "openai_error"},
+        )
 
         if error_code == "unsupported_country_region_territory":
             detail = (
@@ -105,13 +146,13 @@ async def run_agent(
             detail=detail,
         ) from exc
     except RateLimitError as exc:
-        logger.warning("OpenAI rate limit reached")
+        logger.warning("OpenAI rate limit reached", extra={"event": "openai_error"})
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="OpenAI rate limit or account quota was reached",
         ) from exc
     except APIConnectionError as exc:
-        logger.warning("Unable to connect to OpenAI API")
+        logger.warning("Unable to connect to OpenAI API", extra={"event": "openai_error"})
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Unable to connect to OpenAI API",
@@ -121,10 +162,26 @@ async def run_agent(
             "OpenAI API returned an error: status=%s request_id=%s",
             exc.status_code,
             getattr(exc, "request_id", None),
+            extra={"event": "openai_error"},
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="OpenAI API returned an unexpected error",
         ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected agent execution failure", extra={"event": "agent_error"})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Agent execution failed",
+        ) from exc
 
-    return AgentResponse(answer=str(result.final_output), agent=result.last_agent.name)
+    logger.info(
+        "Agent run completed",
+        extra={"event": "agent_run", "agent": result.last_agent.name},
+    )
+    return AgentResponse(
+        run_id=get_correlation_id(),
+        status="completed",
+        answer=str(result.final_output),
+        agent=result.last_agent.name,
+    )
