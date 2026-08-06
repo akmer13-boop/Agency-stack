@@ -8,38 +8,41 @@
 
 Безопасный FastAPI-фундамент, OpenAI Agents SDK, Bearer-авторизация, логи, correlation ID, тесты и Docker.
 
-### Stage 2
+### Stage 2 и 2.1 — пройдено
 
-Рабочий Telegram-бот через long polling с allowlist по Telegram user ID.
+- Telegram-бот через long polling;
+- allowlist и роли пользователей;
+- специализированные агенты;
+- SQLite-память по Telegram user ID;
+- команды `/help`, `/status`, `/reset`.
 
-### Stage 2.1 — пройдено
+### Stage 3.0 и 3.1 — пройдено
 
-Локальная приёмка на macOS подтверждена 2026-08-06.
+- безопасный read-only клиент коробочного Bitrix24;
+- подтверждённое соединение через входящий вебхук;
+- чтение воронок, стадий и тестовых сделок;
+- локальная сводка без передачи карточек в OpenAI;
+- жёсткая блокировка любых методов записи.
 
-Реализованы и проверены:
+### Stage 3.2 — реализовано
 
-- роли: администратор, руководитель, сотрудник, наблюдатель;
-- специализированные агенты: ИИ-РОП, аналитик сделок, база знаний, техадминистратор;
-- автоматическая маршрутизация запроса;
-- SQLite-память отдельно для каждого Telegram-пользователя;
-- команды `/help`, `/status`, `/reset`;
-- локальный аудит технических событий;
-- постоянный Docker volume для SQLite;
-- запрет попадания локальной базы и WAL/SHM-файлов в Git.
+- тестовые лиды только для игрушечного Bitrix24;
+- имена ответственных сотрудников;
+- локальный поиск зависших сделок;
+- локальный поиск сделок и лидов без ответственного;
+- версия проекта `0.3.2`.
 
-Подробный результат: [`docs/stage-2.1-status.md`](docs/stage-2.1-status.md).
+Подробности:
 
-### Stage 3 — начат
-
-Создана ветка `stage-3-bitrix-readonly` для подключения коробочного Bitrix24 строго в режиме чтения.
-
-Запись в CRM остаётся запрещённой.
+- [`docs/stage-2.1-status.md`](docs/stage-2.1-status.md)
+- [`docs/stage-3.1-status.md`](docs/stage-3.1-status.md)
+- [`docs/stage-3.2-status.md`](docs/stage-3.2-status.md)
 
 ## Локальная настройка на macOS
 
 ```bash
-git switch stage-2-telegram
-git pull --ff-only origin stage-2-telegram
+git switch stage-3-bitrix-readonly
+git pull --ff-only origin stage-3-bitrix-readonly
 ./.venv/bin/python -m pip install -e '.[dev]'
 nano .env
 ```
@@ -47,28 +50,30 @@ nano .env
 Основные настройки `.env`:
 
 ```env
-APP_VERSION=0.2.1
+APP_VERSION=0.3.2
 OPENAI_API_KEY=
 TELEGRAM_BOT_TOKEN=
-
-# Пользователи без отдельной роли получают роль «Сотрудник»
-TELEGRAM_ALLOWED_USER_IDS=123456789
-
-# Ролевые списки одновременно дают доступ к боту
-TELEGRAM_ADMIN_USER_IDS=
-TELEGRAM_MANAGER_USER_IDS=
-TELEGRAM_OBSERVER_USER_IDS=
+TELEGRAM_MANAGER_USER_IDS=123456789
 
 DATABASE_PATH=data/agency_stack.db
 CONVERSATION_HISTORY_LIMIT=12
+
+BITRIX24_WEBHOOK_URL=
+BITRIX24_TIMEOUT_SECONDS=15
+BITRIX24_VERIFY_SSL=true
+BITRIX24_MAX_PAGES=20
+BITRIX24_DEAL_PREVIEW_LIMIT=20
+BITRIX24_SUMMARY_LIMIT=500
+
+# Только для игрушечного Bitrix24 с вымышленными людьми
+BITRIX24_DEMO_MODE=true
+BITRIX24_ALLOW_LEADS=true
+BITRIX24_LEAD_PREVIEW_LIMIT=20
+BITRIX24_STALE_DAYS=3
+BITRIX24_STALE_LIMIT=100
+
 OPENAI_TRACING_ENABLED=false
 ALLOW_CRM_WRITE=false
-```
-
-Для назначения владельца бота руководителем:
-
-```env
-TELEGRAM_MANAGER_USER_IDS=123456789
 ```
 
 ## Запуск Telegram-бота
@@ -77,14 +82,22 @@ TELEGRAM_MANAGER_USER_IDS=123456789
 bash scripts/run-telegram.sh
 ```
 
-Команды:
+Основные команды:
 
 ```text
-/start   — главное меню
-/help    — помощь
-/status  — версия, роль и размер памяти
-/reset   — очистить память текущего пользователя
-/id      — показать Telegram ID
+/start
+/help
+/status
+/reset
+/id
+/bitrix_status
+/bitrix_pipelines
+/bitrix_stages
+/bitrix_deals
+/bitrix_summary
+/bitrix_leads
+/bitrix_stuck
+/bitrix_unassigned
 ```
 
 ## Запуск API
@@ -105,14 +118,6 @@ bash scripts/run-telegram.sh
 
 ## Docker
 
-API:
-
-```bash
-docker compose up --build
-```
-
-API и Telegram worker:
-
 ```bash
 docker compose --profile telegram up --build
 ```
@@ -123,9 +128,12 @@ docker compose --profile telegram up --build
 - Stage 1 — API-фундамент и первый агент.
 - Stage 2 — Telegram и авторизация.
 - Stage 2.1 — роли, память и специализированные агенты — **пройдено**.
-- Stage 3 — Bitrix24 только чтение — **начат**.
+- Stage 3.0 — read-only подключение Bitrix24 — **пройдено**.
+- Stage 3.1 — воронки, стадии и сделки — **пройдено**.
+- Stage 3.2 — лиды и локальный контроль зависаний — **реализовано**.
+- Stage 3.3 — безопасный аналитический контекст для ИИ-РОПа.
 - Stage 4 — полноценный ИИ-РОП и аналитика продаж.
 
 ## Безопасность
 
-Секреты, реальные Telegram ID, клиентские данные, `.env` и локальная SQLite-база не коммитятся в Git. Все чувствительные значения задаются только через переменные окружения или секрет-хранилище.
+Секреты, реальные Telegram ID, `.env` и локальная SQLite-база не коммитятся в Git. Методы создания, обновления и удаления данных Bitrix24 не входят в разрешённый список. `ALLOW_CRM_WRITE=false` остаётся обязательным.

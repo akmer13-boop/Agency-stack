@@ -78,6 +78,7 @@ async def health(settings: SettingsDependency) -> dict[str, str | bool]:
         "version": settings.app_version,
         "openai_configured": bool(settings.openai_api_key),
         "telegram_configured": bool(settings.telegram_bot_token),
+        "bitrix24_configured": settings.bitrix24_configured,
         "crm_write_enabled": settings.allow_crm_write,
     }
 
