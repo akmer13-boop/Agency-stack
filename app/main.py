@@ -1,6 +1,6 @@
 import secrets
 
-from agents import Runner
+from agents import Runner, set_default_openai_key, set_tracing_disabled
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -8,7 +8,14 @@ from app.agents.orchestrator import orchestrator
 from app.config import Settings, get_settings
 
 
-app = FastAPI(title="Agency Stack", version="0.1.0")
+settings = get_settings()
+
+if settings.openai_api_key:
+    set_default_openai_key(settings.openai_api_key)
+
+set_tracing_disabled(not settings.openai_tracing_enabled)
+
+app = FastAPI(title=settings.app_name, version=settings.app_version)
 
 
 class AgentRequest(BaseModel):
