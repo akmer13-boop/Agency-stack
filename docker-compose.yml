@@ -1,5 +1,5 @@
 services:
-  agency-stack:
+  agency-stack-api:
     build:
       context: .
     env_file:
@@ -7,3 +7,13 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+  agency-stack-telegram:
+    build:
+      context: .
+    command: ["python", "-m", "app.telegram.bot"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    profiles:
+      - telegram
