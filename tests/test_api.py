@@ -13,7 +13,7 @@ def configured_settings() -> Settings:
     return Settings(
         _env_file=None,
         environment="test",
-        app_version="0.3.1",
+        app_version="0.3.2",
         openai_api_key="test-openai-key",
         agent_api_token=TEST_AGENT_TOKEN,
         openai_tracing_enabled=False,
@@ -39,7 +39,7 @@ def test_health_reports_safe_runtime_state(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "environment": "test",
-        "version": "0.3.1",
+        "version": "0.3.2",
         "openai_configured": True,
         "telegram_configured": False,
         "bitrix24_configured": False,
@@ -62,7 +62,7 @@ def test_agent_endpoint_rejects_missing_openai_key() -> None:
     settings = Settings(
         _env_file=None,
         environment="test",
-        app_version="0.3.1",
+        app_version="0.3.2",
         openai_api_key="",
         agent_api_token=TEST_AGENT_TOKEN,
         telegram_bot_token="",
