@@ -8,72 +8,92 @@
 
 ## Текущий статус
 
-Stage 1 реализует безопасный технический фундамент:
+Stage 1: безопасный технический фундамент.
 
-- FastAPI backend;
-- OpenAI Agents SDK;
-- первый агент-оркестратор;
-- Bearer-авторизация внутреннего API;
-- запрет записи в CRM по умолчанию;
-- correlation ID для каждого запроса;
-- структурированные JSON-логи;
+Stage 2: локальный Telegram-канал в режиме long polling:
+
+- `/start` и `/id`;
+- закрытый allowlist по неизменяемому Telegram user ID;
+- безопасный запрет доступа при пустом allowlist;
+- текстовый запрос из Telegram в оркестратор;
+- возврат ответа частями до лимита Telegram;
+- главное меню с демонстрационными сценариями;
+- in-memory rate limit на пользователя;
 - безопасная обработка ошибок OpenAI;
-- автотесты, Ruff и GitHub Actions;
-- Dockerfile, Docker Compose и health-check контейнера.
+- отдельные тесты доступа, handlers и форматирования сообщений.
 
-## Локальный запуск на macOS
+## Локальная настройка на macOS
 
 ```bash
-git switch stage-1-foundation
-git pull origin stage-1-foundation
-chmod +x scripts/setup-local.sh scripts/test-agent.sh
-./scripts/setup-local.sh
+git switch stage-2-telegram
+git pull --ff-only origin stage-2-telegram
+bash scripts/setup-local.sh
+./.venv/bin/python -m pip install -e '.[dev]'
 nano .env
-./.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-В другом Terminal:
+Обязательные настройки `.env`:
+
+```env
+OPENAI_API_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_IDS=123456789
+TELEGRAM_REQUEST_COOLDOWN_SECONDS=2
+OPENAI_TRACING_ENABLED=false
+ALLOW_CRM_WRITE=false
+```
+
+Несколько Telegram ID задаются через запятую:
+
+```env
+TELEGRAM_ALLOWED_USER_IDS=123456789,987654321
+```
+
+## Запуск API
 
 ```bash
-./scripts/test-agent.sh
+./.venv/bin/python -m uvicorn app.main:app \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --reload
 ```
 
-## Локальный запуск на Windows
+## Запуск Telegram-бота
 
-```powershell
-git switch stage-1-foundation
-git pull origin stage-1-foundation
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-local.ps1
-notepad .env
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+Во втором Terminal:
+
+```bash
+bash scripts/run-telegram.sh
+```
+
+Либо напрямую:
+
+```bash
+./.venv/bin/python -m app.telegram.bot
 ```
 
 ## Проверки
 
 ```bash
-ruff check .
-pytest -q
+./.venv/bin/ruff check .
+./.venv/bin/pytest -q
 ```
 
 ## Docker
 
-Сборка и запуск одной командой:
+Только API:
 
 ```bash
 docker compose up --build
 ```
 
-Либо вручную:
+API и Telegram:
 
 ```bash
-docker build -t agency-stack:local .
-docker run --rm \
-  --env-file .env \
-  -p 8000:8000 \
-  agency-stack:local
+docker compose --profile telegram up --build
 ```
 
-После запуска:
+После запуска API:
 
 - health-check: `http://127.0.0.1:8000/health`;
 - Swagger: `http://127.0.0.1:8000/docs`.
