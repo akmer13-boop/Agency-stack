@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.0"
+    app_version: str = "0.3.1"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     bitrix24_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
     bitrix24_verify_ssl: bool = True
     bitrix24_max_pages: int = Field(default=20, ge=1, le=100)
+    bitrix24_deal_preview_limit: int = Field(default=20, ge=1, le=50)
+    bitrix24_summary_limit: int = Field(default=500, ge=1, le=5000)
 
     allow_crm_write: bool = False
 
