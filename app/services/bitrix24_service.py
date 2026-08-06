@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from app.config import Settings
 from app.integrations.bitrix24 import (
     Bitrix24ConfigurationError,
-    Bitrix24ReadOnlyClient,
     Bitrix24RequestError,
 )
+from app.integrations.bitrix24.compatible_client import CompatibleBitrix24ReadOnlyClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,8 +20,8 @@ class Bitrix24ConnectionStatus:
     error: str | None = None
 
 
-def build_bitrix24_client(settings: Settings) -> Bitrix24ReadOnlyClient:
-    return Bitrix24ReadOnlyClient(
+def build_bitrix24_client(settings: Settings) -> CompatibleBitrix24ReadOnlyClient:
+    return CompatibleBitrix24ReadOnlyClient(
         settings.bitrix24_webhook_url,
         timeout_seconds=settings.bitrix24_timeout_seconds,
         verify_ssl=settings.bitrix24_verify_ssl,
