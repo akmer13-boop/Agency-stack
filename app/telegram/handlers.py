@@ -8,8 +8,19 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from app.config import Settings
 from app.domain import UserRole
+from app.integrations.bitrix24 import Bitrix24ConfigurationError, Bitrix24RequestError
 from app.observability import correlation_id_var
 from app.services.agent_runner import AgentExecutionError, execute_agent
+from app.services.bitrix24_reporting import (
+    fetch_deal_categories,
+    fetch_deal_summary,
+    fetch_pipeline_stages,
+    fetch_recent_deals,
+    format_deal_categories,
+    format_deal_summary,
+    format_pipeline_stages,
+    format_recent_deals,
+)
 from app.services.bitrix24_service import check_bitrix24_connection
 from app.services.routing import route_message
 from app.storage.conversation_store import ConversationStore
@@ -19,6 +30,7 @@ from app.telegram.rate_limit import UserRateLimiter
 
 logger = logging.getLogger(__name__)
 router = Router(name="agency-stack-telegram")
+BITRIX_READ_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER})
 
 
 def _user_id(message: Message) -> int | None:
@@ -50,6 +62,45 @@ async def _sync_user(
         role=role,
     )
     return role
+
+
+async def _require_bitrix_reader(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> UserRole | None:
+    if not is_telegram_user_allowed(_user_id(message), settings):
+        await _deny_access(message)
+        return None
+
+    role = await _sync_user(message, settings, conversation_store)
+    if role not in BITRIX_READ_ROLES:
+        await message.answer(
+            "Доступ к аналитике Bitrix24 разрешён только руководителю, "
+            "администратору или наблюдателю."
+        )
+        return None
+    return role
+
+
+async def _send_long_text(message: Message, text: str, settings: Settings) -> None:
+    for chunk in split_telegram_text(text, settings.telegram_reply_chunk_size):
+        await message.answer(chunk)
+
+
+async def _report_bitrix_error(
+    message: Message,
+    error: Bitrix24ConfigurationError | Bitrix24RequestError,
+) -> None:
+    logger.warning(
+        "Bitrix24 report request failed",
+        extra={
+            "event": "bitrix24_report_error",
+            "user_id": _user_id(message),
+            "error_type": type(error).__name__,
+        },
+    )
+    await message.answer(f"Не удалось прочитать данные Bitrix24: {error}")
 
 
 @router.message(CommandStart())
@@ -93,6 +144,10 @@ async def help_handler(
         "/help — список команд\n"
         "/status — статус и роль\n"
         "/bitrix_status — проверить подключение Bitrix24\n"
+        "/bitrix_pipelines — показать воронки\n"
+        "/bitrix_stages — показать стадии воронок\n"
+        "/bitrix_deals — показать последние тестовые сделки\n"
+        "/bitrix_summary — локальная сводка по сделкам\n"
         "/reset — очистить память диалога\n"
         "/id — показать Telegram ID\n\n"
         f"Текущая роль: {role.label if role else 'не определена'}."
@@ -131,11 +186,9 @@ async def bitrix_status_handler(
     settings: Settings,
     conversation_store: ConversationStore,
 ) -> None:
-    if not is_telegram_user_allowed(_user_id(message), settings):
-        await _deny_access(message)
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
         return
 
-    await _sync_user(message, settings, conversation_store)
     status = await check_bitrix24_connection(settings)
     if not status.configured:
         await message.answer("Bitrix24 не настроен. Добавьте BITRIX24_WEBHOOK_URL в .env.")
@@ -152,6 +205,84 @@ async def bitrix_status_handler(
         f"Администратор портала: {admin_label}\n"
         "Запись в CRM: запрещена"
     )
+
+
+@router.message(Command("bitrix_pipelines"))
+async def bitrix_pipelines_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        categories = await fetch_deal_categories(settings)
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(message, format_deal_categories(categories), settings)
+
+
+@router.message(Command("bitrix_stages"))
+async def bitrix_stages_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        groups = await fetch_pipeline_stages(settings)
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(message, format_pipeline_stages(groups), settings)
+
+
+@router.message(Command("bitrix_deals"))
+async def bitrix_deals_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        deals = await fetch_recent_deals(
+            settings,
+            max_items=settings.bitrix24_deal_preview_limit,
+        )
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(message, format_recent_deals(deals), settings)
+
+
+@router.message(Command("bitrix_summary"))
+async def bitrix_summary_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        summary = await fetch_deal_summary(
+            settings,
+            max_items=settings.bitrix24_summary_limit,
+        )
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(message, format_deal_summary(summary), settings)
 
 
 @router.message(Command("reset"))
