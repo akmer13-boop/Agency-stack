@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.2"
+    app_version: str = "0.3.3"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
