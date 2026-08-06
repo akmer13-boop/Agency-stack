@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.main import Runner, app
 
-
 TEST_AGENT_TOKEN = "test-agent-token"
 
 

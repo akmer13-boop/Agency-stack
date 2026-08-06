@@ -7,7 +7,6 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "correlation_id",
     default="-",

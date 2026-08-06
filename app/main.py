@@ -23,7 +23,6 @@ from app.observability import (
     get_correlation_id,
 )
 
-
 configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
