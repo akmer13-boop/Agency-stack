@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
+    openai_tracing_enabled: bool = False
     agent_api_token: str = Field(default="", repr=False)
     agent_max_turns: int = Field(default=6, ge=1, le=20)
 
