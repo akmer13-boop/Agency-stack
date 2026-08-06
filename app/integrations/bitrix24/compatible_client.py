@@ -23,7 +23,8 @@ def _translate_deal_error(error: Bitrix24RequestError) -> Bitrix24RequestError:
         message = "Bitrix24 отклонил авторизацию вебхука при чтении сделок (HTTP 401)."
     elif code == "HTTP_403" or code.upper() in {"ACCESS_DENIED", "NO_ACCESS"}:
         message = (
-            "Bitrix24 запретил чтение сделок. Дайте пользователю вебхука право просмотра CRM-сделок."
+            "Bitrix24 запретил чтение сделок. "
+            "Дайте пользователю вебхука право просмотра CRM-сделок."
         )
     elif code == "HTTP_404":
         message = (
