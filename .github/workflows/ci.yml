@@ -1,11 +1,10 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches:
       - main
-      - stage-1-foundation
-  pull_request:
 
 permissions:
   contents: read
