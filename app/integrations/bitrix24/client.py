@@ -265,7 +265,7 @@ class Bitrix24ReadOnlyClient:
             {
                 "select": list(DEAL_ANALYTICS_FIELDS),
                 "filter": filters,
-                "order": {"ID": "ASC"},
+                "order": {"ID": "DESC"},
             },
             max_items=max_items,
         )
