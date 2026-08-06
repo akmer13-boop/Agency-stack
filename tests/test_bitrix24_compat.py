@@ -59,6 +59,22 @@ async def test_deal_list_uses_only_fields_supported_by_boxed_portal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_user_directory_failure_does_not_block_reports() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/user.get.json")
+        return httpx.Response(403, json={"error": "ACCESS_DENIED"})
+
+    client = CompatibleBitrix24ReadOnlyClient(
+        WEBHOOK_URL,
+        transport=httpx.MockTransport(handler),
+    )
+
+    users = await client.list_users()
+
+    assert users == []
+
+
+@pytest.mark.asyncio
 async def test_deal_permission_error_is_explained_safely() -> None:
     async def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"error": "ACCESS_DENIED"})
