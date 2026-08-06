@@ -7,7 +7,6 @@ from app.integrations.bitrix24.client import (
     Bitrix24RequestError,
 )
 
-
 INVENTORY_SYSTEM_METHODS = frozenset({"method.get", "methods"})
 
 

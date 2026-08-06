@@ -17,7 +17,6 @@ from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
 
-
 router = Router(name="bitrix24-inventory")
 BITRIX_INVENTORY_ROLES = frozenset(
     {UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER}
