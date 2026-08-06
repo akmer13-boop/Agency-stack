@@ -14,12 +14,19 @@ from app.services.agent_runner import AgentExecutionError, execute_agent
 from app.services.bitrix24_reporting import (
     fetch_deal_categories,
     fetch_deal_summary,
+    fetch_demo_leads,
     fetch_pipeline_stages,
     fetch_recent_deals,
+    fetch_user_directory,
+    find_stuck_deals,
+    find_unassigned_cards,
     format_deal_categories,
     format_deal_summary,
+    format_demo_leads,
     format_pipeline_stages,
     format_recent_deals,
+    format_stuck_deals,
+    format_unassigned_cards,
 )
 from app.services.bitrix24_service import check_bitrix24_connection
 from app.services.routing import route_message
@@ -148,6 +155,9 @@ async def help_handler(
         "/bitrix_stages — показать стадии воронок\n"
         "/bitrix_deals — показать последние тестовые сделки\n"
         "/bitrix_summary — локальная сводка по сделкам\n"
+        "/bitrix_leads — показать тестовые лиды\n"
+        "/bitrix_stuck — найти зависшие активные сделки\n"
+        "/bitrix_unassigned — найти карточки без ответственного\n"
         "/reset — очистить память диалога\n"
         "/id — показать Telegram ID\n\n"
         f"Текущая роль: {role.label if role else 'не определена'}."
@@ -176,6 +186,7 @@ async def status_handler(
         f"Роль: {role.label if role else 'не определена'}\n"
         f"Сообщений в памяти: {message_count}\n"
         f"Bitrix24: {bitrix_status}\n"
+        f"Режим Bitrix24: {'игрушечный' if settings.bitrix24_demo_mode else 'обычный'}\n"
         f"Запись в CRM: {'разрешена' if settings.allow_crm_write else 'запрещена'}"
     )
 
@@ -257,11 +268,12 @@ async def bitrix_deals_handler(
             settings,
             max_items=settings.bitrix24_deal_preview_limit,
         )
+        users = await fetch_user_directory(settings)
     except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
         await _report_bitrix_error(message, exc)
         return
 
-    await _send_long_text(message, format_recent_deals(deals), settings)
+    await _send_long_text(message, format_recent_deals(deals, users), settings)
 
 
 @router.message(Command("bitrix_summary"))
@@ -283,6 +295,91 @@ async def bitrix_summary_handler(
         return
 
     await _send_long_text(message, format_deal_summary(summary), settings)
+
+
+@router.message(Command("bitrix_leads"))
+async def bitrix_leads_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        leads = await fetch_demo_leads(
+            settings,
+            max_items=settings.bitrix24_lead_preview_limit,
+        )
+        users = await fetch_user_directory(settings)
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(message, format_demo_leads(leads, users), settings)
+
+
+@router.message(Command("bitrix_stuck"))
+async def bitrix_stuck_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        deals = await fetch_recent_deals(
+            settings,
+            max_items=settings.bitrix24_stale_limit,
+        )
+        users = await fetch_user_directory(settings)
+        stuck = find_stuck_deals(
+            deals,
+            stale_days=settings.bitrix24_stale_days,
+            users=users,
+        )
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(
+        message,
+        format_stuck_deals(stuck, stale_days=settings.bitrix24_stale_days),
+        settings,
+    )
+
+
+@router.message(Command("bitrix_unassigned"))
+async def bitrix_unassigned_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if await _require_bitrix_reader(message, settings, conversation_store) is None:
+        return
+
+    try:
+        deals = await fetch_recent_deals(
+            settings,
+            max_items=settings.bitrix24_stale_limit,
+        )
+        leads = []
+        if settings.bitrix24_demo_mode and settings.bitrix24_allow_leads:
+            leads = await fetch_demo_leads(
+                settings,
+                max_items=settings.bitrix24_stale_limit,
+            )
+        unassigned_deals, unassigned_leads = find_unassigned_cards(deals, leads)
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await _report_bitrix_error(message, exc)
+        return
+
+    await _send_long_text(
+        message,
+        format_unassigned_cards(unassigned_deals, unassigned_leads),
+        settings,
+    )
 
 
 @router.message(Command("reset"))
