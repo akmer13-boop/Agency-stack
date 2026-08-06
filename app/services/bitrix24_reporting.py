@@ -44,6 +44,14 @@ def _value(item: dict[str, Any], *keys: str, default: Any = None) -> Any:
     return default
 
 
+def _first_nonempty(item: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = item.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _to_int(value: Any, *, default: int = 0) -> int:
     try:
         return int(value)
@@ -245,17 +253,16 @@ def find_stuck_deals(
         if semantic in {"S", "F"}:
             continue
 
-        activity_at = _parse_datetime(
-            _value(
-                deal,
-                "MOVED_TIME",
-                "movedTime",
-                "DATE_MODIFY",
-                "dateModify",
-                "DATE_CREATE",
-                "dateCreate",
-            )
+        activity_raw = _first_nonempty(
+            deal,
+            "MOVED_TIME",
+            "movedTime",
+            "DATE_MODIFY",
+            "dateModify",
+            "DATE_CREATE",
+            "dateCreate",
         )
+        activity_at = _parse_datetime(activity_raw)
         if activity_at is None or activity_at > cutoff:
             continue
 
@@ -276,7 +283,12 @@ def find_unassigned_cards(
     leads: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     def is_unassigned(item: dict[str, Any]) -> bool:
-        return _value(item, "ASSIGNED_BY_ID", "assignedById") in (None, "", "0", 0)
+        return _value(item, "ASSIGNED_BY_ID", "assignedById") in (
+            None,
+            "",
+            "0",
+            0,
+        )
 
     return (
         [deal for deal in deals if is_unassigned(deal)],
@@ -358,7 +370,8 @@ def format_recent_deals(
 
         lines.append(
             f"• #{deal_id} | воронка {category} | стадия {stage}\n"
-            f"  сумма: {amount_text} | ответственный: {responsible_name(deal, users)}\n"
+            f"  сумма: {amount_text} | "
+            f"ответственный: {responsible_name(deal, users)}\n"
             f"  изменена: {modified}"
         )
     return "\n".join(lines)
@@ -381,9 +394,12 @@ def format_demo_leads(
         lines.append(
             f"• #{lead_id} — {title}\n"
             f"  статус: {status} | источник: {source}\n"
-            f"  ответственный: {responsible_name(lead, users)} | изменён: {modified}"
+            f"  ответственный: {responsible_name(lead, users)} | "
+            f"изменён: {modified}"
         )
-    lines.append("\nДанные показаны только потому, что включён режим игрушечного Bitrix24.")
+    lines.append(
+        "\nДанные показаны только потому, что включён режим игрушечного Bitrix24."
+    )
     return "\n".join(lines)
 
 
@@ -399,11 +415,18 @@ def format_stuck_deals(stuck_deals: list[StuckDeal], *, stale_days: int) -> str:
         deal_id = _value(item.deal, "ID", "id", default="?")
         stage = _value(item.deal, "STAGE_ID", "stageId", default="не указана")
         lines.append(
-            f"• #{deal_id} | стадия {stage} | без движения {item.inactive_days} дн.\n"
+            f"• #{deal_id} | стадия {stage} | "
+            f"без движения {item.inactive_days} дн.\n"
             f"  ответственный: {item.responsible_name}"
         )
     lines.append("\nРасчёт выполнен локально. Данные в OpenAI не передавались.")
     return "\n".join(lines)
+
+
+def _card_ids(items: list[dict[str, Any]]) -> str:
+    return ", ".join(
+        f"#{_value(item, 'ID', 'id', default='?')}" for item in items[:30]
+    )
 
 
 def format_unassigned_cards(
@@ -419,9 +442,9 @@ def format_unassigned_cards(
         f"• лиды: {len(leads)}",
     ]
     if deals:
-        lines.append("\nСделки: " + ", ".join(f"#{_value(item, 'ID', 'id', default='?')}" for item in deals[:30]))
+        lines.append(f"\nСделки: {_card_ids(deals)}")
     if leads:
-        lines.append("\nЛиды: " + ", ".join(f"#{_value(item, 'ID', 'id', default='?')}" for item in leads[:30]))
+        lines.append(f"\nЛиды: {_card_ids(leads)}")
     lines.append("\nРасчёт выполнен локально. Данные в OpenAI не передавались.")
     return "\n".join(lines)
 
@@ -454,5 +477,7 @@ def format_deal_summary(summary: DealSummary) -> str:
         for stage, count in summary.by_stage[:10]:
             lines.append(f"• {stage}: {count}")
 
-    lines.append("\nСводка рассчитана локально. Данные сделок в OpenAI не передавались.")
+    lines.append(
+        "\nСводка рассчитана локально. Данные сделок в OpenAI не передавались."
+    )
     return "\n".join(lines)
