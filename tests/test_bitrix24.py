@@ -5,6 +5,8 @@ import pytest
 
 from app.integrations.bitrix24.client import (
     DEAL_ANALYTICS_FIELDS,
+    LEAD_DEMO_FIELDS,
+    USER_DIRECTORY_FIELDS,
     Bitrix24ConfigurationError,
     Bitrix24ReadOnlyClient,
     Bitrix24ReadOnlyViolation,
@@ -72,6 +74,47 @@ async def test_list_deals_paginates_and_uses_minimal_fields() -> None:
     assert set(selected_fields) == set(DEAL_ANALYTICS_FIELDS)
     assert "COMMENTS" not in selected_fields
     assert "CONTACT_ID" not in selected_fields
+
+
+@pytest.mark.asyncio
+async def test_demo_leads_use_explicit_minimal_fields() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/crm.lead.list.json")
+        payload = json.loads(request.content)
+        assert set(payload["select"]) == set(LEAD_DEMO_FIELDS)
+        assert "PHONE" not in payload["select"]
+        assert "EMAIL" not in payload["select"]
+        return httpx.Response(200, json={"result": [{"ID": "9", "TITLE": "Demo"}]})
+
+    client = Bitrix24ReadOnlyClient(
+        WEBHOOK_URL,
+        transport=httpx.MockTransport(handler),
+    )
+
+    leads = await client.list_leads(max_items=10)
+
+    assert leads == [{"ID": "9", "TITLE": "Demo"}]
+
+
+@pytest.mark.asyncio
+async def test_user_directory_requests_only_required_fields() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/user.get.json")
+        payload = json.loads(request.content)
+        assert set(payload["select"]) == set(USER_DIRECTORY_FIELDS)
+        return httpx.Response(
+            200,
+            json={"result": [{"ID": "2", "NAME": "Иван", "LAST_NAME": "Иванов"}]},
+        )
+
+    client = Bitrix24ReadOnlyClient(
+        WEBHOOK_URL,
+        transport=httpx.MockTransport(handler),
+    )
+
+    users = await client.list_users()
+
+    assert users[0]["ID"] == "2"
 
 
 @pytest.mark.asyncio
