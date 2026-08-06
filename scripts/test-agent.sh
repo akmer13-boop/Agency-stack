@@ -55,9 +55,33 @@ print(json.dumps({"message": sys.argv[1]}, ensure_ascii=False))
 PY
 )"
 
-curl -fsS \
+RESPONSE_FILE="$(mktemp)"
+trap 'rm -f "$RESPONSE_FILE"' EXIT
+
+HTTP_STATUS="$(curl -sS \
+  -o "$RESPONSE_FILE" \
+  -w '%{http_code}' \
   -X POST http://127.0.0.1:8000/api/v1/agent-runs \
   -H "Authorization: Bearer $AGENT_TOKEN" \
   -H "Content-Type: application/json; charset=utf-8" \
-  --data "$PAYLOAD" \
-  | python3 -m json.tool
+  --data "$PAYLOAD")"
+
+python3 - "$RESPONSE_FILE" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+raw = path.read_text(encoding="utf-8")
+try:
+    payload = json.loads(raw)
+except json.JSONDecodeError:
+    print(raw)
+else:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+PY
+
+if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+  echo "HTTP status: $HTTP_STATUS" >&2
+  exit 1
+fi
