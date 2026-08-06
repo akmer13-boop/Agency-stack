@@ -10,6 +10,7 @@ from app.config import Settings
 from app.domain import UserRole
 from app.observability import correlation_id_var
 from app.services.agent_runner import AgentExecutionError, execute_agent
+from app.services.bitrix24_service import check_bitrix24_connection
 from app.services.routing import route_message
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
@@ -91,6 +92,7 @@ async def help_handler(
         "/start — главное меню\n"
         "/help — список команд\n"
         "/status — статус и роль\n"
+        "/bitrix_status — проверить подключение Bitrix24\n"
         "/reset — очистить память диалога\n"
         "/id — показать Telegram ID\n\n"
         f"Текущая роль: {role.label if role else 'не определена'}."
@@ -112,13 +114,43 @@ async def status_handler(
 
     role = await _sync_user(message, settings, conversation_store)
     message_count = await conversation_store.count_messages(user_id)
+    bitrix_status = "настроен" if settings.bitrix24_configured else "не настроен"
     await message.answer(
         "Agency Stack работает.\n"
         f"Версия: {settings.app_version}\n"
         f"Роль: {role.label if role else 'не определена'}\n"
         f"Сообщений в памяти: {message_count}\n"
-        "Bitrix24: не подключён\n"
+        f"Bitrix24: {bitrix_status}\n"
         f"Запись в CRM: {'разрешена' if settings.allow_crm_write else 'запрещена'}"
+    )
+
+
+@router.message(Command("bitrix_status"))
+async def bitrix_status_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not is_telegram_user_allowed(_user_id(message), settings):
+        await _deny_access(message)
+        return
+
+    await _sync_user(message, settings, conversation_store)
+    status = await check_bitrix24_connection(settings)
+    if not status.configured:
+        await message.answer("Bitrix24 не настроен. Добавьте BITRIX24_WEBHOOK_URL в .env.")
+        return
+    if not status.connected:
+        await message.answer(f"Bitrix24 недоступен: {status.error}")
+        return
+
+    admin_label = "да" if status.webhook_user_is_admin else "нет"
+    await message.answer(
+        "Bitrix24 подключён в режиме только чтения.\n"
+        f"Портал: {status.portal_host}\n"
+        f"ID пользователя вебхука: {status.webhook_user_id or 'не определён'}\n"
+        f"Администратор портала: {admin_label}\n"
+        "Запись в CRM: запрещена"
     )
 
 

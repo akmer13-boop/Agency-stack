@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.2.1"
+    app_version: str = "0.3.0"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -50,7 +50,16 @@ class Settings(BaseSettings):
     database_path: str = "data/agency_stack.db"
     conversation_history_limit: int = Field(default=12, ge=2, le=50)
 
+    bitrix24_webhook_url: str = Field(default="", repr=False)
+    bitrix24_timeout_seconds: float = Field(default=15.0, ge=1.0, le=60.0)
+    bitrix24_verify_ssl: bool = True
+    bitrix24_max_pages: int = Field(default=20, ge=1, le=100)
+
     allow_crm_write: bool = False
+
+    @property
+    def bitrix24_configured(self) -> bool:
+        return bool(self.bitrix24_webhook_url.strip())
 
     @property
     def admin_telegram_user_ids(self) -> frozenset[int]:
