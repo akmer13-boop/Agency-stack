@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.services.bitrix24_reporting import (
@@ -165,7 +165,7 @@ def test_stuck_deals_excludes_closed_and_sorts_by_inactivity() -> None:
         deals,
         stale_days=3,
         users={"7": "Менеджер Один", "8": "Менеджер Два"},
-        now=datetime(2026, 8, 6, 12, tzinfo=timezone.utc),
+        now=datetime(2026, 8, 6, 12, tzinfo=UTC),
     )
     text = format_stuck_deals(stuck, stale_days=3)
 

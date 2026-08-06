@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -88,8 +88,8 @@ def _parse_datetime(value: Any) -> datetime | None:
     except ValueError:
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def build_user_directory(users: list[dict[str, Any]]) -> dict[str, str]:
@@ -242,7 +242,7 @@ def find_stuck_deals(
     users: dict[str, str] | None = None,
     now: datetime | None = None,
 ) -> list[StuckDeal]:
-    reference = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    reference = (now or datetime.now(UTC)).astimezone(UTC)
     cutoff = reference - timedelta(days=stale_days)
     result: list[StuckDeal] = []
 
