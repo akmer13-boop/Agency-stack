@@ -22,6 +22,19 @@ Stage 2: локальный Telegram-канал в режиме long polling:
 - безопасная обработка ошибок OpenAI;
 - отдельные тесты доступа, handlers и форматирования сообщений.
 
+Подтверждён рабочий сквозной сценарий:
+
+```text
+Telegram
+  → проверка Telegram user ID
+  → Agency Stack handler
+  → OpenAI Agents SDK
+  → Agency Stack Orchestrator
+  → ответ обратно в Telegram
+```
+
+Подробный статус: [`docs/stage-2-status.md`](docs/stage-2-status.md).
+
 ## Локальная настройка на macOS
 
 ```bash
