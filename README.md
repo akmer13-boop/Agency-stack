@@ -19,7 +19,7 @@ Stage 1 реализует безопасный технический фунд�
 - структурированные JSON-логи;
 - безопасная обработка ошибок OpenAI;
 - автотесты, Ruff и GitHub Actions;
-- Dockerfile и health-check контейнера.
+- Dockerfile, Docker Compose и health-check контейнера.
 
 ## Локальный запуск на macOS
 
@@ -57,15 +57,16 @@ pytest -q
 
 ## Docker
 
-Сборка:
+Сборка и запуск одной командой:
+
+```bash
+docker compose up --build
+```
+
+Либо вручную:
 
 ```bash
 docker build -t agency-stack:local .
-```
-
-Запуск с локальным `.env`:
-
-```bash
 docker run --rm \
   --env-file .env \
   -p 8000:8000 \
