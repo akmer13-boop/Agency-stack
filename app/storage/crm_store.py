@@ -82,6 +82,19 @@ class CrmStore:
             await database.commit()
             return int(cursor.lastrowid)
 
+    async def update_run_progress(self, run_id: int, summary: dict[str, int]) -> None:
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            await database.execute(
+                """
+                UPDATE crm_sync_runs
+                SET summary_json = ?
+                WHERE id = ? AND status = 'running'
+                """,
+                (json.dumps(summary, sort_keys=True), run_id),
+            )
+            await database.commit()
+
     async def finish_run(self, run_id: int, summary: dict[str, int]) -> None:
         async with aiosqlite.connect(self.database_path) as database:
             await _prepare_connection(database)
