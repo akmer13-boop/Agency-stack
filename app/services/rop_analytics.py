@@ -229,7 +229,10 @@ def _build_period_kpi(
     )
 
 
-def _period_windows(reference: datetime, timezone_name: str) -> tuple[tuple[str, str, datetime], ...]:
+def _period_windows(
+    reference: datetime,
+    timezone_name: str,
+) -> tuple[tuple[str, str, datetime], ...]:
     timezone = _resolve_timezone(timezone_name)
     local_now = reference.astimezone(timezone)
     local_day_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -485,7 +488,10 @@ def format_rop_funnel(snapshot: RopSnapshot) -> str:
         f"• Активные: {snapshot.active_deals}",
         f"• Успешные: {snapshot.won_deals}",
         f"• Проигранные: {snapshot.lost_deals}",
-        f"• Историческая конверсия закрытых → продажа: {_percent(snapshot.closed_conversion_percent)}",
+        (
+            "• Историческая конверсия закрытых → продажа: "
+            f"{_percent(snapshot.closed_conversion_percent)}"
+        ),
     ]
 
     if snapshot.category_counts:
