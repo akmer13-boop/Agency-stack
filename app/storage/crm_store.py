@@ -191,6 +191,23 @@ class CrmStore:
             rows = await cursor.fetchall()
         return {str(row[0]): int(row[1]) for row in rows}
 
+    async def get_last_completed_run_started_at(self) -> str | None:
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            cursor = await database.execute(
+                """
+                SELECT started_at
+                FROM crm_sync_runs
+                WHERE status = 'completed'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            )
+            row = await cursor.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
     async def get_last_run(self) -> CrmSyncRunStatus:
         async with aiosqlite.connect(self.database_path) as database:
             await _prepare_connection(database)
