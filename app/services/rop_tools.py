@@ -23,6 +23,14 @@ from app.services.rop_deep_analytics import (
     format_manager_report,
     format_stage_aging_report,
 )
+from app.services.rop_mvp3 import (
+    build_cycle_time_report,
+    build_focus_report,
+    build_stage_sla_report,
+    format_cycle_time_report,
+    format_focus_report,
+    format_stage_sla_report,
+)
 
 
 async def _build_snapshot(settings: Settings) -> RopSnapshot:
@@ -105,7 +113,42 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-        return format_manager_report(report)
+        return format_manager_report(
+            report,
+            min_closed_sample=settings.rop_manager_min_closed_sample,
+        )
+
+    @function_tool
+    async def get_rop_sla() -> str:
+        """Return stage-specific SLA candidates for qualification and quote follow-up."""
+        report = await build_stage_sla_report(
+            settings.database_path,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_stage_sla_report(report)
+
+    @function_tool
+    async def get_rop_cycle_time() -> str:
+        """Return WON cycle time and qualification-to-quote timing from stage history."""
+        report = await build_cycle_time_report(
+            settings.database_path,
+            timezone_name=settings.rop_timezone,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_cycle_time_report(report)
+
+    @function_tool
+    async def get_rop_focus() -> str:
+        """Return today's deterministic focus-list from business-confirmed SLA stages."""
+        report = await build_focus_report(
+            settings.database_path,
+            limit=settings.rop_focus_limit,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_focus_report(report)
 
     return [
         get_rop_period,
@@ -115,4 +158,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_losses,
         get_rop_stage_aging,
         get_rop_managers,
+        get_rop_sla,
+        get_rop_cycle_time,
+        get_rop_focus,
     ]
