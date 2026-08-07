@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.3"
+    app_version: str = "0.3.4"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -62,11 +62,29 @@ class Settings(BaseSettings):
     bitrix24_stale_days: int = Field(default=3, ge=1, le=365)
     bitrix24_stale_limit: int = Field(default=100, ge=1, le=1000)
 
+    proxy_type: str = ""
+    proxy_host: str = Field(default="", repr=False)
+    proxy_port: int = Field(default=0, ge=0, le=65535)
+    proxy_username: str = Field(default="", repr=False)
+    proxy_password: str = Field(default="", repr=False)
+
     allow_crm_write: bool = False
 
     @property
     def bitrix24_configured(self) -> bool:
         return bool(self.bitrix24_webhook_url.strip())
+
+    @property
+    def proxy_configured(self) -> bool:
+        return bool(
+            self.proxy_type.strip()
+            and self.proxy_host.strip()
+            and self.proxy_port > 0
+        )
+
+    @property
+    def proxy_uses_credentials(self) -> bool:
+        return bool(self.proxy_username.strip() and self.proxy_password)
 
     @property
     def admin_telegram_user_ids(self) -> frozenset[int]:
