@@ -21,6 +21,9 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_pipeline",
         "get_rop_funnel",
         "get_rop_risks",
+        "get_rop_losses",
+        "get_rop_stage_aging",
+        "get_rop_managers",
     }
 
 
@@ -32,6 +35,9 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_pipeline" in names
     assert "get_rop_funnel" in names
     assert "get_rop_risks" in names
+    assert "get_rop_losses" in names
+    assert "get_rop_stage_aging" in names
+    assert "get_rop_managers" in names
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
