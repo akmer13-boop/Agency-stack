@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.8"
+    app_version: str = "0.3.9"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     bitrix24_sync_retry_backoff_seconds: float = Field(default=2.0, ge=0.1, le=30.0)
     bitrix24_sync_page_delay_seconds: float = Field(default=0.25, ge=0.0, le=5.0)
     bitrix24_sync_overlap_minutes: int = Field(default=5, ge=0, le=120)
+
+    rop_attention_days: int = Field(default=3, ge=1, le=365)
+    rop_critical_days: int = Field(default=5, ge=1, le=365)
+    rop_risk_limit: int = Field(default=20, ge=1, le=100)
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
