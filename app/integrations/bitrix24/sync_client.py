@@ -195,16 +195,24 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
             items.extend(page)
         return items
 
+    @staticmethod
+    def _modified_filter(field: str, modified_since: str | None) -> dict[str, str]:
+        if not modified_since:
+            return {}
+        return {f">={field}": modified_since}
+
     async def iter_sync_deals(
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.deal.list",
             {
                 "select": ["*", "UF_*"],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("DATE_MODIFY", modified_since),
             },
             max_items=max_items,
         ):
@@ -214,19 +222,24 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._collect_pages(self.iter_sync_deals(max_items=max_items))
+        return await self._collect_pages(
+            self.iter_sync_deals(max_items=max_items, modified_since=modified_since)
+        )
 
     async def iter_sync_leads(
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.lead.list",
             {
                 "select": ["*", "UF_*"],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("DATE_MODIFY", modified_since),
             },
             max_items=max_items,
         ):
@@ -236,19 +249,24 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._collect_pages(self.iter_sync_leads(max_items=max_items))
+        return await self._collect_pages(
+            self.iter_sync_leads(max_items=max_items, modified_since=modified_since)
+        )
 
     async def iter_sync_contacts(
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.contact.list",
             {
                 "select": ["*", "UF_*"],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("DATE_MODIFY", modified_since),
             },
             max_items=max_items,
         ):
@@ -258,19 +276,24 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._collect_pages(self.iter_sync_contacts(max_items=max_items))
+        return await self._collect_pages(
+            self.iter_sync_contacts(max_items=max_items, modified_since=modified_since)
+        )
 
     async def iter_sync_companies(
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.company.list",
             {
                 "select": ["*", "UF_*"],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("DATE_MODIFY", modified_since),
             },
             max_items=max_items,
         ):
@@ -280,19 +303,24 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._collect_pages(self.iter_sync_companies(max_items=max_items))
+        return await self._collect_pages(
+            self.iter_sync_companies(max_items=max_items, modified_since=modified_since)
+        )
 
     async def iter_sync_activities(
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.activity.list",
             {
                 "select": ["*"],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("LAST_UPDATED", modified_since),
             },
             max_items=max_items,
         ):
@@ -302,14 +330,18 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         max_items: int | None = None,
+        modified_since: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self._collect_pages(self.iter_sync_activities(max_items=max_items))
+        return await self._collect_pages(
+            self.iter_sync_activities(max_items=max_items, modified_since=modified_since)
+        )
 
     async def iter_sync_stage_history(
         self,
         *,
         entity_type_id: int,
         max_items: int | None = None,
+        created_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
         async for page in self._iter_id_cursor_pages(
             "crm.stagehistory.list",
@@ -325,6 +357,7 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
                     "STAGE_ID",
                 ],
                 "order": {"ID": "ASC"},
+                "filter": self._modified_filter("CREATED_TIME", created_since),
             },
             result_key="items",
             max_items=max_items,
@@ -336,10 +369,12 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         *,
         entity_type_id: int,
         max_items: int | None = None,
+        created_since: str | None = None,
     ) -> list[dict[str, Any]]:
         return await self._collect_pages(
             self.iter_sync_stage_history(
                 entity_type_id=entity_type_id,
                 max_items=max_items,
+                created_since=created_since,
             )
         )
