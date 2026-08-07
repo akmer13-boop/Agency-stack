@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from math import ceil
 from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -50,6 +51,8 @@ class CycleTimeStat:
     sample_count: int
     median_days: float
     average_days: float
+    p90_days: float
+    over_180d_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,12 +75,16 @@ class FocusDeal:
     critical_days: int
     severity: str
     rule_label: str
+    business_bucket: str
+    value_percentile: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
 class FocusReport:
     total_candidates: int
     critical_candidates: int
+    monetary_candidates: int
+    hygiene_candidates: int
     deals: tuple[FocusDeal, ...]
 
 
@@ -216,6 +223,14 @@ def _active_rules_for_scope(
     )
 
 
+def _percentile_nearest_rank(values: list[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(1, ceil(percentile * len(ordered)))
+    return float(ordered[rank - 1])
+
+
 async def build_stage_sla_report(
     database_path: str,
     *,
@@ -297,6 +312,8 @@ def _cycle_stats(
             sample_count=len(values),
             median_days=float(median(values)),
             average_days=sum(values) / len(values),
+            p90_days=_percentile_nearest_rank(values, 0.90),
+            over_180d_count=sum(value >= 180 for value in values),
         )
         for category_id, values in by_category.items()
         if values
@@ -399,6 +416,22 @@ async def build_cycle_time_report(
     )
 
 
+def _focus_value_percentile(
+    item: FocusDeal,
+    values_by_currency: dict[str, list[Decimal]],
+) -> float:
+    values = values_by_currency.get(item.currency, [])
+    if not values:
+        return 0.0
+    less_or_equal = sum(value <= item.opportunity for value in values)
+    return less_or_equal / len(values)
+
+
+def _focus_overdue_ratio(item: FocusDeal) -> float:
+    baseline = item.critical_days if item.severity == "critical" else item.attention_days
+    return item.age_days / max(1, baseline)
+
+
 async def build_focus_report(
     database_path: str,
     *,
@@ -434,7 +467,9 @@ async def build_focus_report(
         age_days = max(0, int((reference - moved_at).total_seconds() // 86400))
         if age_days < rule.attention_days:
             continue
+        opportunity = _decimal(deal.get("OPPORTUNITY"))
         severity = "critical" if age_days >= rule.critical_days else "attention"
+        business_bucket = "hygiene" if opportunity <= Decimal("1") else "money"
         candidates.append(
             FocusDeal(
                 deal_id=_text(deal.get("ID"), "?"),
@@ -442,27 +477,65 @@ async def build_focus_report(
                 stage_id=stage_id,
                 assigned_by_id=_text(deal.get("ASSIGNED_BY_ID"), "не назначен"),
                 currency=_text(deal.get("CURRENCY_ID"), "N/A").upper(),
-                opportunity=_decimal(deal.get("OPPORTUNITY")),
+                opportunity=opportunity,
                 age_days=age_days,
                 attention_days=rule.attention_days,
                 critical_days=rule.critical_days,
                 severity=severity,
                 rule_label=rule.label,
+                business_bucket=business_bucket,
             )
         )
 
-    candidates.sort(
+    values_by_currency: defaultdict[str, list[Decimal]] = defaultdict(list)
+    for item in candidates:
+        if item.business_bucket == "money":
+            values_by_currency[item.currency].append(item.opportunity)
+
+    candidates = [
+        replace(
+            item,
+            value_percentile=_focus_value_percentile(item, values_by_currency),
+        )
+        for item in candidates
+    ]
+
+    monetary = [item for item in candidates if item.business_bucket == "money"]
+    hygiene = [item for item in candidates if item.business_bucket == "hygiene"]
+
+    monetary.sort(
         key=lambda item: (
             item.severity == "critical",
-            item.age_days - item.critical_days,
+            item.value_percentile,
+            _focus_overdue_ratio(item),
             item.age_days,
         ),
         reverse=True,
     )
+    hygiene.sort(
+        key=lambda item: (
+            item.severity == "critical",
+            _focus_overdue_ratio(item),
+            item.age_days,
+        ),
+        reverse=True,
+    )
+
+    money_target = min(len(monetary), max(1, int(limit * 0.75)))
+    selected_money = monetary[:money_target]
+    remaining = max(0, limit - len(selected_money))
+    selected_hygiene = hygiene[:remaining]
+    remaining = max(0, limit - len(selected_money) - len(selected_hygiene))
+    if remaining:
+        selected_money = monetary[: money_target + remaining]
+
+    selected = tuple([*selected_money, *selected_hygiene][:limit])
     return FocusReport(
         total_candidates=len(candidates),
         critical_candidates=sum(item.severity == "critical" for item in candidates),
-        deals=tuple(candidates[:limit]),
+        monetary_candidates=len(monetary),
+        hygiene_candidates=len(hygiene),
+        deals=selected,
     )
 
 
@@ -482,11 +555,13 @@ def format_stage_sla_report(stats: tuple[StageSlaStat, ...]) -> str:
     lines.append("\nИзмеряемые стадии:")
     for item in stats:
         rule = item.rule
+        critical_share = 100 * item.critical_count / item.active_count if item.active_count else 0
         lines.append(
             f"• {category_label(rule.category_id)} · {stage_label(rule.stage_id)} | "
             f"активных {item.active_count} | медиана {item.median_days:.1f} дн. | "
             f"внимание {item.attention_count} (≥{rule.attention_days} дн.) | "
-            f"критично {item.critical_count} (≥{rule.critical_days} дн.)"
+            f"критично {item.critical_count} (≥{rule.critical_days} дн.; "
+            f"{critical_share:.1f}% стадии)"
         )
     lines.append(
         "\nКвалификация: критический порог 72 ч. КП/предложение: окно follow-up "
@@ -503,7 +578,8 @@ def _format_cycle_section(title: str, stats: tuple[CycleTimeStat, ...]) -> list[
     for item in stats:
         lines.append(
             f"• {category_label(item.category_id)} | n={item.sample_count} | "
-            f"медиана {item.median_days:.1f} дн. | среднее {item.average_days:.1f} дн."
+            f"медиана {item.median_days:.1f} дн. | среднее {item.average_days:.1f} дн. | "
+            f"p90 {item.p90_days:.1f} дн. | ≥180 дн. {item.over_180d_count}"
         )
     return lines
 
@@ -511,7 +587,12 @@ def _format_cycle_section(title: str, stats: tuple[CycleTimeStat, ...]) -> list[
 def format_cycle_time_report(report: CycleTimeReport) -> str:
     lines = ["ИИ-РОП · cycle time"]
     lines.extend(_format_cycle_section("\nWON текущего месяца:", report.month))
-    lines.extend(_format_cycle_section("\nWON за последние 90 дней:", report.trailing_90d))
+    lines.extend(
+        _format_cycle_section(
+            "\nWON, закрытые за последние 90 дней:",
+            report.trailing_90d,
+        )
+    )
 
     lines.append("\nКвалификация → КП/предложение по deal_stage_history:")
     if not report.qualification_to_quote:
@@ -528,11 +609,23 @@ def format_cycle_time_report(report: CycleTimeReport) -> str:
             f"сейчас на квалификации без КП >72ч {item.active_pending_over_72h}"
         )
     lines.append(
-        "\nCycle time = DATE_CREATE → финальное закрытие WON. Период 90 дней отбирается "
-        "по дате закрытия WON, поэтому дата создания сделки может быть значительно раньше. "
-        "Переход квалификация→КП считается по локальной истории стадий, без LLM."
+        "\nCycle time = DATE_CREATE → финальное закрытие WON. 90-дневный блок "
+        "отбирает сделки по дате закрытия WON, поэтому дата создания может быть "
+        "существенно раньше. p90 и количество сделок ≥180 дней помогают увидеть "
+        "старый хвост. Переход квалификация→КП считается по локальной истории стадий, "
+        "без LLM."
     )
     return "\n".join(lines)
+
+
+def _format_focus_deal(item: FocusDeal) -> str:
+    severity = "КРИТИЧНО" if item.severity == "critical" else "ВНИМАНИЕ"
+    return (
+        f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
+        f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
+        f"{_money(item.opportunity)} {item.currency} | отв. ID {item.assigned_by_id} | "
+        f"{item.rule_label}"
+    )
 
 
 def format_focus_report(report: FocusReport) -> str:
@@ -540,22 +633,27 @@ def format_focus_report(report: FocusReport) -> str:
         "ИИ-РОП · focus-list на сегодня",
         f"• кандидатов по измеряемым SLA: {report.total_candidates}",
         f"• критических: {report.critical_candidates}",
+        f"• с заполненной суммой >1: {report.monetary_candidates}",
+        f"• с нулевой/технической суммой ≤1: {report.hygiene_candidates}",
     ]
     if not report.deals:
         lines.append("\nКандидаты по текущим SLA-правилам не найдены.")
         return "\n".join(lines)
 
-    lines.append("\nПриоритетные карточки:")
-    for item in report.deals:
-        severity = "КРИТИЧНО" if item.severity == "critical" else "ВНИМАНИЕ"
-        lines.append(
-            f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
-            f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
-            f"{_money(item.opportunity)} {item.currency} | отв. ID {item.assigned_by_id} | "
-            f"{item.rule_label}"
-        )
+    money = [item for item in report.deals if item.business_bucket == "money"]
+    hygiene = [item for item in report.deals if item.business_bucket == "hygiene"]
+
+    if money:
+        lines.append("\nПриоритет: сделки с суммой под риском:")
+        lines.extend(_format_focus_deal(item) for item in money)
+
+    if hygiene:
+        lines.append("\nОтдельно: гигиена CRM / техническая сумма — проверить:")
+        lines.extend(_format_focus_deal(item) for item in hygiene)
+
     lines.append(
-        "\nСортировка учитывает тяжесть SLA и длительность. Суммы разных валют между "
-        "собой не сравниваются и не используются как единая выручка."
+        "\nСначала показываются SLA-критичность и относительная значимость суммы "
+        "внутри той же валюты; разные валюты напрямую не сравниваются. Карточки с "
+        "OPPORTUNITY ≤1 не удаляются, а выносятся в отдельный data-quality bucket."
     )
     return "\n".join(lines)
