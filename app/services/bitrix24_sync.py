@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,25 +23,35 @@ class BitrixSyncResult:
 def build_sync_client(settings: Settings) -> SyncBitrix24Client:
     return SyncBitrix24Client(
         settings.bitrix24_webhook_url,
-        timeout_seconds=settings.bitrix24_timeout_seconds,
+        timeout_seconds=settings.bitrix24_sync_timeout_seconds,
         verify_ssl=settings.bitrix24_verify_ssl,
         max_pages=settings.bitrix24_sync_max_pages,
         proxy_url=build_proxy_url(settings, remote_dns=True),
+        retry_attempts=settings.bitrix24_sync_retry_attempts,
+        retry_backoff_seconds=settings.bitrix24_sync_retry_backoff_seconds,
+        page_delay_seconds=settings.bitrix24_sync_page_delay_seconds,
     )
 
 
-async def _store_dataset(
+async def _sync_pages(
     store: CrmStore,
+    run_id: int,
     counts: dict[str, int],
     entity_type: str,
-    items: list[dict[str, Any]],
+    pages: AsyncIterator[list[dict[str, Any]]],
     modified_field: str,
 ) -> None:
-    counts[entity_type] = await store.upsert_entities(
-        entity_type,
-        items,
-        modified_field=modified_field,
-    )
+    counts[entity_type] = 0
+    await store.update_run_progress(run_id, counts)
+
+    async for page in pages:
+        written = await store.upsert_entities(
+            entity_type,
+            page,
+            modified_field=modified_field,
+        )
+        counts[entity_type] += written
+        await store.update_run_progress(run_id, counts)
 
 
 async def run_initial_bitrix_sync(settings: Settings) -> BitrixSyncResult:
@@ -55,56 +66,63 @@ async def run_initial_bitrix_sync(settings: Settings) -> BitrixSyncResult:
     counts: dict[str, int] = {}
 
     try:
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "deal",
-            await client.list_sync_deals(max_items=limit),
+            client.iter_sync_deals(max_items=limit),
             "DATE_MODIFY",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "lead",
-            await client.list_sync_leads(max_items=limit),
+            client.iter_sync_leads(max_items=limit),
             "DATE_MODIFY",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "contact",
-            await client.list_sync_contacts(max_items=limit),
+            client.iter_sync_contacts(max_items=limit),
             "DATE_MODIFY",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "company",
-            await client.list_sync_companies(max_items=limit),
+            client.iter_sync_companies(max_items=limit),
             "DATE_MODIFY",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "activity",
-            await client.list_sync_activities(max_items=limit),
+            client.iter_sync_activities(max_items=limit),
             "LAST_UPDATED",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "deal_stage_history",
-            await client.list_sync_stage_history(
+            client.iter_sync_stage_history(
                 entity_type_id=2,
                 max_items=limit,
             ),
             "CREATED_TIME",
         )
-        await _store_dataset(
+        await _sync_pages(
             store,
+            run_id,
             counts,
             "lead_stage_history",
-            await client.list_sync_stage_history(
+            client.iter_sync_stage_history(
                 entity_type_id=1,
                 max_items=limit,
             ),
@@ -127,8 +145,8 @@ async def get_bitrix_sync_status(settings: Settings) -> tuple[CrmSyncRunStatus, 
     return await store.get_last_run(), await store.count_by_type()
 
 
-def format_sync_result(result: BitrixSyncResult) -> str:
-    labels = {
+def _labels() -> dict[str, str]:
+    return {
         "deal": "Сделки",
         "lead": "Лиды",
         "contact": "Контакты",
@@ -137,6 +155,10 @@ def format_sync_result(result: BitrixSyncResult) -> str:
         "deal_stage_history": "История стадий сделок",
         "lead_stage_history": "История стадий лидов",
     }
+
+
+def format_sync_result(result: BitrixSyncResult) -> str:
+    labels = _labels()
     lines = [f"Bitrix24 sync завершён. Run #{result.run_id}"]
     for entity_type, count in result.counts.items():
         lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
@@ -145,15 +167,7 @@ def format_sync_result(result: BitrixSyncResult) -> str:
 
 
 def format_sync_status(status: CrmSyncRunStatus, counts: dict[str, int]) -> str:
-    labels = {
-        "deal": "Сделки",
-        "lead": "Лиды",
-        "contact": "Контакты",
-        "company": "Компании",
-        "activity": "Активности",
-        "deal_stage_history": "История стадий сделок",
-        "lead_stage_history": "История стадий лидов",
-    }
+    labels = _labels()
     if status.run_id is None:
         return "Bitrix24 sync ещё не запускался."
 
@@ -167,7 +181,12 @@ def format_sync_status(status: CrmSyncRunStatus, counts: dict[str, int]) -> str:
     if status.error_code:
         lines.append(f"Ошибка: {status.error_code}")
 
-    lines.append("\nЛокально сохранено:")
+    if status.summary:
+        lines.append("\nПрогресс текущего запуска:")
+        for entity_type, count in status.summary.items():
+            lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
+
+    lines.append("\nЛокально сохранено всего:")
     for entity_type, count in counts.items():
         lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
     return "\n".join(lines)
