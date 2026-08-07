@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.observability import configure_logging
 from app.runtime import configure_openai_runtime
 from app.storage.conversation_store import ConversationStore
+from app.telegram.bitrix_inventory_handlers import router as bitrix_inventory_router
 from app.telegram.handlers import router
 from app.telegram.rate_limit import UserRateLimiter
 
@@ -36,6 +37,7 @@ async def run_telegram_bot() -> None:
 
     bot = Bot(token=settings.telegram_bot_token)
     dispatcher = Dispatcher()
+    dispatcher.include_router(bitrix_inventory_router)
     dispatcher.include_router(router)
     rate_limiter = UserRateLimiter(settings.telegram_request_cooldown_seconds)
 
