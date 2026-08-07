@@ -13,8 +13,11 @@ from app.services.rop_analytics import (
     RopSnapshot,
     build_rop_snapshot,
     format_rop_funnel,
+    format_rop_month,
+    format_rop_pipeline,
     format_rop_risks,
     format_rop_today,
+    format_rop_week,
 )
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
@@ -73,6 +76,9 @@ async def _render_snapshot(
             attention_days=settings.rop_attention_days,
             critical_days=settings.rop_critical_days,
             risk_limit=settings.rop_risk_limit,
+            timezone_name=settings.rop_timezone,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
         )
     await _send_long_text(message, formatter(snapshot), settings)
 
@@ -83,12 +89,34 @@ async def rop_today_handler(
     settings: Settings,
     conversation_store: ConversationStore,
 ) -> None:
-    await _render_snapshot(
-        message,
-        settings,
-        conversation_store,
-        format_rop_today,
-    )
+    await _render_snapshot(message, settings, conversation_store, format_rop_today)
+
+
+@router.message(Command("rop_week"))
+async def rop_week_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    await _render_snapshot(message, settings, conversation_store, format_rop_week)
+
+
+@router.message(Command("rop_month"))
+async def rop_month_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    await _render_snapshot(message, settings, conversation_store, format_rop_month)
+
+
+@router.message(Command("rop_pipeline"))
+async def rop_pipeline_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    await _render_snapshot(message, settings, conversation_store, format_rop_pipeline)
 
 
 @router.message(Command("rop_funnel"))
@@ -97,12 +125,7 @@ async def rop_funnel_handler(
     settings: Settings,
     conversation_store: ConversationStore,
 ) -> None:
-    await _render_snapshot(
-        message,
-        settings,
-        conversation_store,
-        format_rop_funnel,
-    )
+    await _render_snapshot(message, settings, conversation_store, format_rop_funnel)
 
 
 @router.message(Command("rop_risks"))
@@ -111,9 +134,4 @@ async def rop_risks_handler(
     settings: Settings,
     conversation_store: ConversationStore,
 ) -> None:
-    await _render_snapshot(
-        message,
-        settings,
-        conversation_store,
-        format_rop_risks,
-    )
+    await _render_snapshot(message, settings, conversation_store, format_rop_risks)
