@@ -11,6 +11,8 @@ from app.services.routing import route_message
         ("Как оформить договор?", AgentRoute.KNOWLEDGE),
         ("Какие сделки зависли без движения?", AgentRoute.DEAL_ANALYST),
         ("Покажи прогноз выручки и план продаж", AgentRoute.SALES_MANAGER),
+        ("Покажи показатели за текущий месяц", AgentRoute.SALES_MANAGER),
+        ("Что по продажам сегодня?", AgentRoute.SALES_MANAGER),
         ("Расскажи, чем ты можешь помочь", AgentRoute.ORCHESTRATOR),
     ],
 )
