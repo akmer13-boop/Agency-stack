@@ -370,7 +370,9 @@ async def build_cycle_time_report(
                 if hours > 72:
                     over_72h += 1
                 continue
-            if _semantic(deal) not in {"S", "F"}:
+
+            current_stage = _text(deal.get("STAGE_ID"), "")
+            if _semantic(deal) not in {"S", "F"} and current_stage == start_stage:
                 pending_hours = max(0.0, (reference - start_at).total_seconds() / 3600)
                 if pending_hours > 72:
                     pending_over_72h += 1
@@ -523,11 +525,12 @@ def format_cycle_time_report(report: CycleTimeReport) -> str:
         lines.append(
             f"• {category_label(item.category_id)} | завершено n={item.completed_count} | "
             f"медиана {median_text} | завершено >72ч {item.over_72h_count} | "
-            f"активных без КП >72ч {item.active_pending_over_72h}"
+            f"сейчас на квалификации без КП >72ч {item.active_pending_over_72h}"
         )
     lines.append(
-        "\nCycle time = DATE_CREATE → финальное закрытие WON. Переход квалификация→КП "
-        "считается по локальной истории стадий, без LLM."
+        "\nCycle time = DATE_CREATE → финальное закрытие WON. Период 90 дней отбирается "
+        "по дате закрытия WON, поэтому дата создания сделки может быть значительно раньше. "
+        "Переход квалификация→КП считается по локальной истории стадий, без LLM."
     )
     return "\n".join(lines)
 
