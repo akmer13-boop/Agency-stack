@@ -9,6 +9,8 @@ from typing import Any
 
 import aiosqlite
 
+from app.storage.crm_store import CrmStore
+
 
 @dataclass(frozen=True, slots=True)
 class CurrencyKpi:
@@ -127,6 +129,9 @@ async def build_rop_snapshot(
     critical_days: int = 5,
     risk_limit: int = 20,
 ) -> RopSnapshot:
+    store = CrmStore(database_path)
+    await store.initialize()
+
     reference = (now or datetime.now(UTC)).astimezone(UTC)
     deals = await _load_raw_entities(database_path, "deal")
     leads = await _load_raw_entities(database_path, "lead")
