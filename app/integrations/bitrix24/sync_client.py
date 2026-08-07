@@ -33,6 +33,8 @@ RETRYABLE_ERROR_CODES: Final[frozenset[str]] = frozenset(
     }
 )
 
+BITRIX_LIST_PAGE_SIZE: Final[int] = 50
+
 
 class SyncBitrix24Client(Bitrix24ReadOnlyClient):
     """Read-only client used by the local CRM synchronizer."""
@@ -90,7 +92,27 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
             raise last_error
         raise Bitrix24RequestError("Bitrix24 sync request failed")
 
-    async def _iter_pages(
+    @staticmethod
+    def _extract_page(
+        response: dict[str, Any],
+        *,
+        result_key: str | None,
+    ) -> list[dict[str, Any]]:
+        result = response.get("result")
+        if result_key is not None:
+            if not isinstance(result, dict):
+                raise Bitrix24RequestError("Bitrix24 returned an invalid list container")
+            page_items = result.get(result_key, [])
+        else:
+            page_items = result
+
+        if not isinstance(page_items, list):
+            raise Bitrix24RequestError("Bitrix24 returned an invalid list response")
+        if any(not isinstance(item, dict) for item in page_items):
+            raise Bitrix24RequestError("Bitrix24 returned invalid list items")
+        return page_items
+
+    async def _iter_id_cursor_pages(
         self,
         method: str,
         params: Mapping[str, Any] | None = None,
@@ -98,26 +120,47 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         result_key: str | None = None,
         max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        next_start = 0
+        """Stream a large list using Bitrix24's recommended stable-ID cursor pattern."""
+        base_params = dict(params or {})
+        base_filter = dict(base_params.get("filter") or {})
+        base_params.pop("filter", None)
+
+        last_id = 0
         yielded = 0
 
         for _page_number in range(self._max_pages):
-            payload = dict(params or {})
-            payload["start"] = next_start
+            payload = dict(base_params)
+            page_filter = dict(base_filter)
+            if last_id:
+                page_filter[">ID"] = last_id
+            if page_filter:
+                payload["filter"] = page_filter
+            payload["start"] = -1
+
             response = await self.call(method, payload)
-            result = response.get("result")
+            page_items = self._extract_page(response, result_key=result_key)
+            if not page_items:
+                return
 
-            if result_key is not None:
-                if not isinstance(result, dict):
-                    raise Bitrix24RequestError("Bitrix24 returned an invalid list container")
-                page_items = result.get(result_key, [])
-            else:
-                page_items = result
+            ids: list[int] = []
+            for item in page_items:
+                raw_id = item.get("ID")
+                try:
+                    item_id = int(raw_id)
+                except (TypeError, ValueError) as exc:
+                    raise Bitrix24RequestError(
+                        "Bitrix24 returned an invalid ID during cursor pagination"
+                    ) from exc
+                ids.append(item_id)
 
-            if not isinstance(page_items, list):
-                raise Bitrix24RequestError("Bitrix24 returned an invalid list response")
+            if ids != sorted(ids):
+                raise Bitrix24RequestError("Bitrix24 cursor page is not ordered by ID")
 
-            clean_page = [item for item in page_items if isinstance(item, dict)]
+            new_last_id = ids[-1]
+            if new_last_id <= last_id:
+                raise Bitrix24RequestError("Bitrix24 cursor pagination stopped advancing")
+
+            clean_page = page_items
             if max_items is not None:
                 remaining = max_items - yielded
                 if remaining <= 0:
@@ -131,19 +174,17 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
             if max_items is not None and yielded >= max_items:
                 return
 
-            raw_next = response.get("next")
-            if raw_next is None:
+            last_id = new_last_id
+            if len(page_items) < BITRIX_LIST_PAGE_SIZE:
                 return
-
-            try:
-                next_start = int(raw_next)
-            except (TypeError, ValueError) as exc:
-                raise Bitrix24RequestError("Bitrix24 returned invalid pagination data") from exc
 
             if self._page_delay_seconds:
                 await asyncio.sleep(self._page_delay_seconds)
 
-        raise Bitrix24RequestError("Bitrix24 pagination safety limit was reached")
+        raise Bitrix24RequestError(
+            "Bitrix24 cursor pagination safety limit was reached",
+            error_code="SYNC_PAGE_SAFETY_LIMIT",
+        )
 
     async def _collect_pages(
         self,
@@ -157,9 +198,9 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
     async def iter_sync_deals(
         self,
         *,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.deal.list",
             {
                 "select": ["*", "UF_*"],
@@ -169,15 +210,19 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         ):
             yield page
 
-    async def list_sync_deals(self, *, max_items: int) -> list[dict[str, Any]]:
+    async def list_sync_deals(
+        self,
+        *,
+        max_items: int | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._collect_pages(self.iter_sync_deals(max_items=max_items))
 
     async def iter_sync_leads(
         self,
         *,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.lead.list",
             {
                 "select": ["*", "UF_*"],
@@ -187,15 +232,19 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         ):
             yield page
 
-    async def list_sync_leads(self, *, max_items: int) -> list[dict[str, Any]]:
+    async def list_sync_leads(
+        self,
+        *,
+        max_items: int | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._collect_pages(self.iter_sync_leads(max_items=max_items))
 
     async def iter_sync_contacts(
         self,
         *,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.contact.list",
             {
                 "select": ["*", "UF_*"],
@@ -205,15 +254,19 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         ):
             yield page
 
-    async def list_sync_contacts(self, *, max_items: int) -> list[dict[str, Any]]:
+    async def list_sync_contacts(
+        self,
+        *,
+        max_items: int | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._collect_pages(self.iter_sync_contacts(max_items=max_items))
 
     async def iter_sync_companies(
         self,
         *,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.company.list",
             {
                 "select": ["*", "UF_*"],
@@ -223,15 +276,19 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         ):
             yield page
 
-    async def list_sync_companies(self, *, max_items: int) -> list[dict[str, Any]]:
+    async def list_sync_companies(
+        self,
+        *,
+        max_items: int | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._collect_pages(self.iter_sync_companies(max_items=max_items))
 
     async def iter_sync_activities(
         self,
         *,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.activity.list",
             {
                 "select": ["*"],
@@ -241,16 +298,20 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         ):
             yield page
 
-    async def list_sync_activities(self, *, max_items: int) -> list[dict[str, Any]]:
+    async def list_sync_activities(
+        self,
+        *,
+        max_items: int | None = None,
+    ) -> list[dict[str, Any]]:
         return await self._collect_pages(self.iter_sync_activities(max_items=max_items))
 
     async def iter_sync_stage_history(
         self,
         *,
         entity_type_id: int,
-        max_items: int,
+        max_items: int | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
-        async for page in self._iter_pages(
+        async for page in self._iter_id_cursor_pages(
             "crm.stagehistory.list",
             {
                 "entityTypeId": entity_type_id,
@@ -274,7 +335,7 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         self,
         *,
         entity_type_id: int,
-        max_items: int,
+        max_items: int | None = None,
     ) -> list[dict[str, Any]]:
         return await self._collect_pages(
             self.iter_sync_stage_history(
