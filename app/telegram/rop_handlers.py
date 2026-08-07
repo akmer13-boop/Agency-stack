@@ -9,6 +9,7 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from app.config import Settings
 from app.domain import UserRole
+from app.integrations.bitrix24 import Bitrix24ConfigurationError, Bitrix24RequestError
 from app.services.rop_analytics import (
     RopSnapshot,
     build_rop_snapshot,
@@ -19,6 +20,7 @@ from app.services.rop_analytics import (
     format_rop_today,
     format_rop_week,
 )
+from app.services.rop_daily import build_rop_daily
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -26,6 +28,12 @@ from app.services.rop_deep_analytics import (
     format_loss_report,
     format_manager_report,
     format_stage_aging_report,
+)
+from app.services.rop_directory import (
+    enrich_responsible_ids,
+    format_directory_sync_result,
+    load_rop_directory,
+    sync_rop_directory,
 )
 from app.services.rop_mvp3 import (
     build_cycle_time_report,
@@ -75,6 +83,11 @@ async def _authorize(
 async def _send_long_text(message: Message, text: str, settings: Settings) -> None:
     for chunk in split_telegram_text(text, settings.telegram_reply_chunk_size):
         await message.answer(chunk)
+
+
+async def _with_local_identities(text: str, settings: Settings) -> str:
+    directory = await load_rop_directory(settings.database_path)
+    return enrich_responsible_ids(text, directory)
 
 
 async def _build_snapshot(settings: Settings) -> RopSnapshot:
@@ -157,6 +170,23 @@ async def rop_risks_handler(
     await _render_snapshot(message, settings, conversation_store, format_rop_risks)
 
 
+@router.message(Command("bitrix_directory_sync"))
+async def bitrix_directory_sync_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    try:
+        async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+            result = await sync_rop_directory(settings)
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await message.answer(f"Справочник Bitrix24 не обновлён: {exc}")
+        return
+    await _send_long_text(message, format_directory_sync_result(result), settings)
+
+
 @router.message(Command("rop_losses"))
 async def rop_losses_handler(
     message: Message,
@@ -172,7 +202,8 @@ async def rop_losses_handler(
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-    await _send_long_text(message, format_loss_report(report), settings)
+        text = await _with_local_identities(format_loss_report(report), settings)
+    await _send_long_text(message, text, settings)
 
 
 @router.message(Command("rop_stage_aging"))
@@ -211,14 +242,12 @@ async def rop_managers_handler(
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-    await _send_long_text(
-        message,
-        format_manager_report(
+        text = format_manager_report(
             report,
             min_closed_sample=settings.rop_manager_min_closed_sample,
-        ),
-        settings,
-    )
+        )
+        text = await _with_local_identities(text, settings)
+    await _send_long_text(message, text, settings)
 
 
 @router.message(Command("rop_sla"))
@@ -271,4 +300,18 @@ async def rop_focus_handler(
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-    await _send_long_text(message, format_focus_report(report), settings)
+        text = await _with_local_identities(format_focus_report(report), settings)
+    await _send_long_text(message, text, settings)
+
+
+@router.message(Command("rop_daily"))
+async def rop_daily_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        text = await build_rop_daily(settings)
+    await _send_long_text(message, text, settings)
