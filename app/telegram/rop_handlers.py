@@ -27,6 +27,14 @@ from app.services.rop_deep_analytics import (
     format_manager_report,
     format_stage_aging_report,
 )
+from app.services.rop_mvp3 import (
+    build_cycle_time_report,
+    build_focus_report,
+    build_stage_sla_report,
+    format_cycle_time_report,
+    format_focus_report,
+    format_stage_sla_report,
+)
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
@@ -203,4 +211,64 @@ async def rop_managers_handler(
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-    await _send_long_text(message, format_manager_report(report), settings)
+    await _send_long_text(
+        message,
+        format_manager_report(
+            report,
+            min_closed_sample=settings.rop_manager_min_closed_sample,
+        ),
+        settings,
+    )
+
+
+@router.message(Command("rop_sla"))
+async def rop_sla_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        report = await build_stage_sla_report(
+            settings.database_path,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+    await _send_long_text(message, format_stage_sla_report(report), settings)
+
+
+@router.message(Command("rop_cycle_time"))
+async def rop_cycle_time_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        report = await build_cycle_time_report(
+            settings.database_path,
+            timezone_name=settings.rop_timezone,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+    await _send_long_text(message, format_cycle_time_report(report), settings)
+
+
+@router.message(Command("rop_focus"))
+async def rop_focus_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        report = await build_focus_report(
+            settings.database_path,
+            limit=settings.rop_focus_limit,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+    await _send_long_text(message, format_focus_report(report), settings)
