@@ -14,9 +14,29 @@ from openai import (
 from app.agents.specialists import get_agent_for_route
 from app.config import Settings
 from app.domain import AgentRoute, UserRole
+from app.services.rop_tools import build_rop_function_tools
 from app.storage.conversation_store import ConversationMessage
 
 logger = logging.getLogger(__name__)
+
+_ANALYTICS_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER})
+_ANALYTICS_ROUTES = frozenset(
+    {
+        AgentRoute.ORCHESTRATOR,
+        AgentRoute.SALES_MANAGER,
+        AgentRoute.DEAL_ANALYST,
+    }
+)
+
+_ROP_TOOL_INSTRUCTIONS = (
+    "\nУ тебя подключены локальные read-only инструменты ИИ-РОПа к синхронизированной "
+    "SQLite CRM. Для любого вопроса о реальных продажах, лидах, сделках, воронке, "
+    "конверсии, выручке, pipeline, текущем месяце/неделе/дне или рисках обязательно "
+    "сначала вызови подходящий инструмент. Не отвечай, что доступа к CRM нет, если "
+    "инструмент доступен. Не проси CSV или экспорт для показателей, которые умеют эти "
+    "инструменты. Считай результат инструмента источником фактов; не придумывай отсутствующие "
+    "поля. В ответе объясняй цифры управленческим языком и отделяй факт от вывода."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +77,18 @@ def build_agent_input(
     )
 
 
+def _prepare_agent(route: AgentRoute, role: UserRole, settings: Settings):
+    agent = get_agent_for_route(route)
+    if role not in _ANALYTICS_ROLES or route not in _ANALYTICS_ROUTES:
+        return agent
+
+    base_instructions = agent.instructions if isinstance(agent.instructions, str) else ""
+    return agent.clone(
+        instructions=base_instructions + _ROP_TOOL_INSTRUCTIONS,
+        tools=[*agent.tools, *build_rop_function_tools(settings)],
+    )
+
+
 async def execute_agent(
     message: str,
     settings: Settings,
@@ -71,7 +103,7 @@ async def execute_agent(
             status_code=503,
         )
 
-    starting_agent = get_agent_for_route(route)
+    starting_agent = _prepare_agent(route, role, settings)
     agent_input = build_agent_input(message, role=role, history=history)
 
     try:
