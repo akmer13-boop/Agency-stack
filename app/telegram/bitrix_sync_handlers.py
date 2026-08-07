@@ -67,11 +67,16 @@ async def bitrix_sync_handler(
 
     role = await _sync_user(message, settings, conversation_store)
     if role not in SYNC_RUN_ROLES:
-        await message.answer("Запуск синхронизации разрешён только руководителю или администратору.")
+        await message.answer(
+            "Запуск синхронизации разрешён только руководителю или администратору."
+        )
         return
 
     if _sync_lock.locked():
-        await message.answer("Синхронизация Bitrix24 уже выполняется. Используйте /bitrix_sync_status.")
+        await message.answer(
+            "Синхронизация Bitrix24 уже выполняется. "
+            "Используйте /bitrix_sync_status."
+        )
         return
 
     await message.answer(
