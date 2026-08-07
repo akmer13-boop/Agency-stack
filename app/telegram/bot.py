@@ -2,9 +2,11 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 
 from app.config import get_settings
 from app.observability import configure_logging
+from app.proxy import build_proxy_url
 from app.runtime import configure_openai_runtime
 from app.storage.conversation_store import ConversationStore
 from app.telegram.bitrix_inventory_handlers import router as bitrix_inventory_router
@@ -35,7 +37,21 @@ async def run_telegram_bot() -> None:
     )
     await conversation_store.initialize()
 
-    bot = Bot(token=settings.telegram_bot_token)
+    proxy_url = build_proxy_url(settings, remote_dns=False)
+    if proxy_url:
+        session = AiohttpSession(proxy=proxy_url)
+        bot = Bot(token=settings.telegram_bot_token, session=session)
+        logger.info(
+            "Outbound proxy enabled for Telegram",
+            extra={
+                "event": "telegram_proxy_enabled",
+                "proxy_type": settings.proxy_type.strip().lower(),
+                "proxy_auth": settings.proxy_uses_credentials,
+            },
+        )
+    else:
+        bot = Bot(token=settings.telegram_bot_token)
+
     dispatcher = Dispatcher()
     dispatcher.include_router(bitrix_inventory_router)
     dispatcher.include_router(router)
