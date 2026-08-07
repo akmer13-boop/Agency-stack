@@ -1,0 +1,30 @@
+services:
+  agency-stack-api:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/agency_stack.db
+    volumes:
+      - agency-stack-data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  agency-stack-telegram:
+    build:
+      context: .
+    command: ["python", "-m", "app.telegram.bot"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/agency_stack.db
+    volumes:
+      - agency-stack-data:/data
+    restart: unless-stopped
+    profiles:
+      - telegram
+
+volumes:
+  agency-stack-data:
