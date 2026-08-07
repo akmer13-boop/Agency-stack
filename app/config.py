@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.4"
+    app_version: str = "0.3.5"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     bitrix24_lead_preview_limit: int = Field(default=20, ge=1, le=50)
     bitrix24_stale_days: int = Field(default=3, ge=1, le=365)
     bitrix24_stale_limit: int = Field(default=100, ge=1, le=1000)
+    bitrix24_sync_max_pages: int = Field(default=200, ge=1, le=2000)
+    bitrix24_sync_max_items_per_entity: int = Field(default=10_000, ge=50, le=100_000)
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
