@@ -117,12 +117,14 @@ class Bitrix24ReadOnlyClient:
         timeout_seconds: float = 15.0,
         verify_ssl: bool = True,
         max_pages: int = 20,
+        proxy_url: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._webhook_url = normalize_webhook_url(webhook_url)
         self._timeout = httpx.Timeout(timeout_seconds)
         self._verify_ssl = verify_ssl
         self._max_pages = max_pages
+        self._proxy_url = proxy_url
         self._transport = transport
 
     @property
@@ -151,6 +153,7 @@ class Bitrix24ReadOnlyClient:
                 timeout=self._timeout,
                 verify=self._verify_ssl,
                 follow_redirects=False,
+                proxy=self._proxy_url,
                 transport=self._transport,
                 headers={
                     "Accept": "application/json",
