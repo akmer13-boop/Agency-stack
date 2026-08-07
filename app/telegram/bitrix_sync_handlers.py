@@ -12,9 +12,11 @@ from app.integrations.bitrix24 import (
     Bitrix24RequestError,
 )
 from app.services.bitrix24_sync import (
+    Bitrix24SyncStateError,
     format_sync_result,
     format_sync_status,
     get_bitrix_sync_status,
+    run_incremental_bitrix_sync,
     run_initial_bitrix_sync,
 )
 from app.storage.conversation_store import ConversationStore
@@ -54,34 +56,45 @@ async def _send_long_text(message: Message, text: str, settings: Settings) -> No
         await message.answer(chunk)
 
 
-@router.message(Command("bitrix_sync"))
-async def bitrix_sync_handler(
+async def _can_run_sync(
     message: Message,
     settings: Settings,
     conversation_store: ConversationStore,
-) -> None:
+) -> bool:
     user_id = _user_id(message)
     if not is_telegram_user_allowed(user_id, settings):
         await message.answer("Доступ к Agency Stack не предоставлен.")
-        return
+        return False
 
     role = await _sync_user(message, settings, conversation_store)
     if role not in SYNC_RUN_ROLES:
         await message.answer(
             "Запуск синхронизации разрешён только руководителю или администратору."
         )
-        return
+        return False
 
     if _sync_lock.locked():
         await message.answer(
             "Синхронизация Bitrix24 уже выполняется. "
             "Используйте /bitrix_sync_status."
         )
+        return False
+    return True
+
+
+@router.message(Command("bitrix_sync"))
+async def bitrix_sync_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _can_run_sync(message, settings, conversation_store):
         return
 
     await message.answer(
-        "Запускаю локальную read-only синхронизацию Bitrix24. "
-        "Данные будут сохранены только в SQLite; запись в CRM не выполняется."
+        "Запускаю полный локальный read-only sync Bitrix24. "
+        "Он проходит всю доступную CRM по ID-cursor. "
+        "Данные сохраняются только в SQLite; запись в CRM не выполняется."
     )
 
     try:
@@ -94,6 +107,41 @@ async def bitrix_sync_handler(
     except Exception:
         await message.answer(
             "Синхронизация Bitrix24 остановлена из-за внутренней ошибки. "
+            "Подробности сохранены только в локальном состоянии запуска."
+        )
+        return
+
+    await _send_long_text(message, format_sync_result(result), settings)
+
+
+@router.message(Command("bitrix_sync_incremental"))
+async def bitrix_sync_incremental_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _can_run_sync(message, settings, conversation_store):
+        return
+
+    await message.answer(
+        "Запускаю incremental read-only sync Bitrix24. "
+        "Будут запрошены только новые и изменённые записи после последнего "
+        "успешного sync с защитным overlap."
+    )
+
+    try:
+        async with _sync_lock:
+            async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+                result = await run_incremental_bitrix_sync(settings)
+    except Bitrix24SyncStateError as exc:
+        await message.answer(f"Incremental sync не запущен: {exc}")
+        return
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await message.answer(f"Синхронизация Bitrix24 остановлена: {exc}")
+        return
+    except Exception:
+        await message.answer(
+            "Incremental sync Bitrix24 остановлен из-за внутренней ошибки. "
             "Подробности сохранены только в локальном состоянии запуска."
         )
         return
