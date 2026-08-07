@@ -269,7 +269,11 @@ class Bitrix24ReadOnlyClient:
         return result
 
     async def list_users(self, *, max_items: int = 1000) -> list[dict[str, Any]]:
-        raw_users = await self.call_all("user.get", max_items=max_items)
+        raw_users = await self.call_all(
+            "user.get",
+            {"select": list(USER_DIRECTORY_FIELDS)},
+            max_items=max_items,
+        )
         return [
             {
                 key: item.get(key)
