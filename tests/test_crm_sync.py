@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import httpx
@@ -47,6 +48,8 @@ async def test_crm_store_upserts_entities_idempotently(tmp_path: Path) -> None:
 async def test_sync_client_reads_stage_history_container() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/crm.stagehistory.list.json")
+        payload = json.loads(request.content)
+        assert payload["start"] == -1
         return httpx.Response(
             200,
             json={
@@ -70,6 +73,40 @@ async def test_sync_client_reads_stage_history_container() -> None:
     )
     items = await client.list_sync_stage_history(entity_type_id=2, max_items=100)
     assert items[0]["ID"] == "11"
+
+
+@pytest.mark.asyncio
+async def test_sync_client_uses_id_cursor_until_real_end() -> None:
+    requests: list[dict[str, object]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        requests.append(payload)
+        after_id = int(payload.get("filter", {}).get(">ID", 0))
+        if after_id == 0:
+            return httpx.Response(
+                200,
+                json={"result": [{"ID": str(item_id)} for item_id in range(1, 51)]},
+            )
+        assert after_id == 50
+        return httpx.Response(
+            200,
+            json={"result": [{"ID": "51"}, {"ID": "52"}]},
+        )
+
+    client = SyncBitrix24Client(
+        WEBHOOK_URL,
+        transport=httpx.MockTransport(handler),
+        page_delay_seconds=0,
+    )
+
+    items = await client.list_sync_leads()
+
+    assert len(items) == 52
+    assert requests[0]["start"] == -1
+    assert ">ID" not in requests[0].get("filter", {})
+    assert requests[1]["start"] == -1
+    assert requests[1]["filter"] == {">ID": 50}
 
 
 @pytest.mark.asyncio
@@ -97,27 +134,47 @@ async def test_sync_client_retries_timeout_without_exposing_webhook() -> None:
 
 
 @pytest.mark.asyncio
+async def test_full_sync_is_unlimited_by_default() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.bitrix24_sync_max_items_per_entity == 0
+    assert settings.bitrix24_sync_item_limit is None
+
+
+@pytest.mark.asyncio
 async def test_initial_sync_persists_all_core_entity_types(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    captured_limits: list[int | None] = []
+
     class FakeClient:
-        async def iter_sync_deals(self, *, max_items: int):
+        async def iter_sync_deals(self, *, max_items: int | None):
+            captured_limits.append(max_items)
             yield [{"ID": "1", "DATE_MODIFY": "2026-08-07T10:00:00+03:00"}]
 
-        async def iter_sync_leads(self, *, max_items: int):
+        async def iter_sync_leads(self, *, max_items: int | None):
+            captured_limits.append(max_items)
             yield [{"ID": "2", "DATE_MODIFY": "2026-08-07T10:00:00+03:00"}]
 
-        async def iter_sync_contacts(self, *, max_items: int):
+        async def iter_sync_contacts(self, *, max_items: int | None):
+            captured_limits.append(max_items)
             yield [{"ID": "3", "DATE_MODIFY": "2026-08-07T10:00:00+03:00"}]
 
-        async def iter_sync_companies(self, *, max_items: int):
+        async def iter_sync_companies(self, *, max_items: int | None):
+            captured_limits.append(max_items)
             yield [{"ID": "4", "DATE_MODIFY": "2026-08-07T10:00:00+03:00"}]
 
-        async def iter_sync_activities(self, *, max_items: int):
+        async def iter_sync_activities(self, *, max_items: int | None):
+            captured_limits.append(max_items)
             yield [{"ID": "5", "LAST_UPDATED": "2026-08-07T10:00:00+03:00"}]
 
-        async def iter_sync_stage_history(self, *, entity_type_id: int, max_items: int):
+        async def iter_sync_stage_history(
+            self,
+            *,
+            entity_type_id: int,
+            max_items: int | None,
+        ):
+            captured_limits.append(max_items)
             yield [
                 {
                     "ID": str(100 + entity_type_id),
@@ -134,7 +191,6 @@ async def test_initial_sync_persists_all_core_entity_types(
         _env_file=None,
         bitrix24_webhook_url=WEBHOOK_URL,
         database_path=str(tmp_path / "sync.db"),
-        bitrix24_sync_max_items_per_entity=100,
     )
 
     result = await run_initial_bitrix_sync(settings)
@@ -147,6 +203,7 @@ async def test_initial_sync_persists_all_core_entity_types(
         "deal_stage_history": 1,
         "lead_stage_history": 1,
     }
+    assert captured_limits == [None] * 7
 
     status, counts = await get_bitrix_sync_status(settings)
     assert status.status == "completed"
@@ -160,25 +217,30 @@ async def test_initial_sync_keeps_completed_pages_when_later_page_fails(
     tmp_path: Path,
 ) -> None:
     class FailingClient:
-        async def iter_sync_deals(self, *, max_items: int):
+        async def iter_sync_deals(self, *, max_items: int | None):
             yield [{"ID": "1", "DATE_MODIFY": "2026-08-07T10:00:00+03:00"}]
             yield [{"ID": "2", "DATE_MODIFY": "2026-08-07T10:01:00+03:00"}]
 
-        async def iter_sync_leads(self, *, max_items: int):
+        async def iter_sync_leads(self, *, max_items: int | None):
             yield [{"ID": "3", "DATE_MODIFY": "2026-08-07T10:02:00+03:00"}]
             raise Bitrix24RequestError("Bitrix24 request timed out", error_code="TIMEOUT")
             yield []  # pragma: no cover
 
-        async def iter_sync_contacts(self, *, max_items: int):
+        async def iter_sync_contacts(self, *, max_items: int | None):
             yield []
 
-        async def iter_sync_companies(self, *, max_items: int):
+        async def iter_sync_companies(self, *, max_items: int | None):
             yield []
 
-        async def iter_sync_activities(self, *, max_items: int):
+        async def iter_sync_activities(self, *, max_items: int | None):
             yield []
 
-        async def iter_sync_stage_history(self, *, entity_type_id: int, max_items: int):
+        async def iter_sync_stage_history(
+            self,
+            *,
+            entity_type_id: int,
+            max_items: int | None,
+        ):
             yield []
 
     monkeypatch.setattr(
@@ -189,7 +251,6 @@ async def test_initial_sync_keeps_completed_pages_when_later_page_fails(
         _env_file=None,
         bitrix24_webhook_url=WEBHOOK_URL,
         database_path=str(tmp_path / "partial.db"),
-        bitrix24_sync_max_items_per_entity=100,
     )
 
     with pytest.raises(Bitrix24RequestError, match="timed out"):
