@@ -19,6 +19,10 @@ def _parse_id_list(raw_values: str, *, variable_name: str) -> frozenset[int]:
     return frozenset(values)
 
 
+def _parse_text_set(raw_values: str) -> frozenset[str]:
+    return frozenset(value.strip() for value in raw_values.split(",") if value.strip())
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -29,7 +33,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.3.9"
+    app_version: str = "0.4.0"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -72,6 +76,9 @@ class Settings(BaseSettings):
     rop_attention_days: int = Field(default=3, ge=1, le=365)
     rop_critical_days: int = Field(default=5, ge=1, le=365)
     rop_risk_limit: int = Field(default=20, ge=1, le=100)
+    rop_timezone: str = "Europe/Moscow"
+    rop_included_category_ids: str = ""
+    rop_excluded_stage_ids: str = ""
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
@@ -88,6 +95,14 @@ class Settings(BaseSettings):
     @property
     def bitrix24_sync_item_limit(self) -> int | None:
         return self.bitrix24_sync_max_items_per_entity or None
+
+    @property
+    def rop_included_categories(self) -> frozenset[str]:
+        return _parse_text_set(self.rop_included_category_ids)
+
+    @property
+    def rop_excluded_stages(self) -> frozenset[str]:
+        return _parse_text_set(self.rop_excluded_stage_ids)
 
     @property
     def proxy_configured(self) -> bool:
