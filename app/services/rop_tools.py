@@ -15,6 +15,14 @@ from app.services.rop_analytics import (
     format_rop_today,
     format_rop_week,
 )
+from app.services.rop_deep_analytics import (
+    build_loss_report,
+    build_manager_report,
+    build_stage_aging_report,
+    format_loss_report,
+    format_manager_report,
+    format_stage_aging_report,
+)
 
 
 async def _build_snapshot(settings: Settings) -> RopSnapshot:
@@ -60,12 +68,51 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_risks() -> str:
-        """Return the highest-priority active deals with 3+ and 5+ day movement risks."""
+        """Return active deal movement-risk candidates using the configured 3+/5+ rule."""
         return format_rop_risks(await _build_snapshot(settings))
+
+    @function_tool
+    async def get_rop_losses() -> str:
+        """Return actual final loss stages for deals lost during the current month."""
+        report = await build_loss_report(
+            settings.database_path,
+            timezone_name=settings.rop_timezone,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_loss_report(report)
+
+    @function_tool
+    async def get_rop_stage_aging() -> str:
+        """Return active-deal stage aging with median age and 3+/5+ counts by stage."""
+        report = await build_stage_aging_report(
+            settings.database_path,
+            attention_days=settings.rop_attention_days,
+            critical_days=settings.rop_critical_days,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_stage_aging_report(report)
+
+    @function_tool
+    async def get_rop_managers() -> str:
+        """Return manager scorecards by ASSIGNED_BY_ID from local synchronized CRM."""
+        report = await build_manager_report(
+            settings.database_path,
+            timezone_name=settings.rop_timezone,
+            attention_days=settings.rop_attention_days,
+            critical_days=settings.rop_critical_days,
+            included_category_ids=settings.rop_included_categories,
+            excluded_stage_ids=settings.rop_excluded_stages,
+        )
+        return format_manager_report(report)
 
     return [
         get_rop_period,
         get_rop_pipeline,
         get_rop_funnel,
         get_rop_risks,
+        get_rop_losses,
+        get_rop_stage_aging,
+        get_rop_managers,
     ]
