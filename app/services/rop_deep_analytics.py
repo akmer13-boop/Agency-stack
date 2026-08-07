@@ -404,19 +404,28 @@ def format_stage_aging_report(report: StageAgingReport, *, limit: int = 20) -> s
     return "\n".join(lines)
 
 
-def format_manager_report(report: ManagerReport, *, limit: int = 20) -> str:
+def format_manager_report(
+    report: ManagerReport,
+    *,
+    limit: int = 20,
+    min_closed_sample: int = 5,
+) -> str:
     lines = [
         "ИИ-РОП · карточки ответственных",
         "Сортировка: сначала критические активные сделки 5+ дней.",
     ]
     for item in report.managers[:limit]:
         closed = item.month_won + item.month_lost
-        conversion = 100 * item.month_won / closed if closed else 0.0
+        if closed >= min_closed_sample:
+            conversion = 100 * item.month_won / closed
+            conversion_text = f"конверсия закрытых {conversion:.1f}% (n={closed})"
+        else:
+            conversion_text = f"конверсия: малая выборка (n={closed})"
         line = (
             f"• ID {item.assigned_by_id} | активных {item.active_count} | "
             f"3+ {item.attention_count} | 5+ {item.critical_count} | "
             f"месяц WON {item.month_won} / LOST {item.month_lost} | "
-            f"конверсия закрытых {conversion:.1f}%"
+            f"{conversion_text}"
         )
         lines.append(line)
         if item.month_won_amounts:
@@ -427,7 +436,11 @@ def format_manager_report(report: ManagerReport, *, limit: int = 20) -> str:
             lines.append(f"  сумма WON: {amounts}")
 
     lines.append(
-        "\nФИО пока не подставляются: в локальной CRM есть ASSIGNED_BY_ID, "
+        f"\nКонверсия не оценивается при менее чем {min_closed_sample} закрытых сделках "
+        "за месяц: такая выборка слишком мала для вывода об эффективности."
+    )
+    lines.append(
+        "ФИО пока не подставляются: в локальной CRM есть ASSIGNED_BY_ID, "
         "но справочник сотрудников ещё не синхронизирован."
     )
     return "\n".join(lines)
