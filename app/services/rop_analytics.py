@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosqlite
 
+from app.services.rop_catalog import category_label, stage_label
 from app.storage.crm_store import CrmStore
 
 
@@ -495,14 +496,14 @@ def format_rop_funnel(snapshot: RopSnapshot) -> str:
     ]
 
     if snapshot.category_counts:
-        lines.append("\nПо воронкам (CATEGORY_ID):")
+        lines.append("\nПо воронкам:")
         for category_id, count in snapshot.category_counts[:15]:
-            lines.append(f"• {category_id}: {count}")
+            lines.append(f"• {category_label(category_id)}: {count}")
 
     if snapshot.stage_counts:
         lines.append("\nТоп стадий:")
         for stage_id, count in snapshot.stage_counts[:20]:
-            lines.append(f"• {stage_id}: {count}")
+            lines.append(f"• {stage_label(stage_id)}: {count}")
 
     lines.append(
         "\nИсторическая конверсия здесь справочная. Бизнесовую конверсию смотрим "
@@ -526,8 +527,9 @@ def format_rop_risks(snapshot: RopSnapshot) -> str:
     for risk in snapshot.risks:
         amount = _money(risk.opportunity)
         lines.append(
-            f"• #{risk.deal_id} | {risk.idle_days} дн. | стадия {risk.stage_id} | "
-            f"{amount} {risk.currency} | ответственный ID {risk.assigned_by_id}"
+            f"• #{risk.deal_id} | {risk.idle_days} дн. | "
+            f"{category_label(risk.category_id)} | {stage_label(risk.stage_id)}\n"
+            f"  {amount} {risk.currency} | ответственный ID {risk.assigned_by_id}"
         )
 
     lines.append("\nКритерий сейчас: последнее MOVED_TIME, затем DATE_MODIFY/DATE_CREATE.")
