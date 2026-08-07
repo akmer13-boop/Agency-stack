@@ -72,6 +72,18 @@ async def test_mvp3_sla_cycle_and_focus_use_local_crm(tmp_path: Path) -> None:
             "MOVED_TIME": (now - timedelta(days=2)).isoformat(),
             "DATE_MODIFY": (now - timedelta(days=2)).isoformat(),
         },
+        {
+            "ID": "5",
+            "CATEGORY_ID": "7",
+            "STAGE_ID": "C7:FINAL_INVOICE",
+            "STAGE_SEMANTIC_ID": "P",
+            "ASSIGNED_BY_ID": "13",
+            "OPPORTUNITY": "4000",
+            "CURRENCY_ID": "RUB",
+            "DATE_CREATE": (now - timedelta(days=10)).isoformat(),
+            "MOVED_TIME": (now - timedelta(days=2)).isoformat(),
+            "DATE_MODIFY": (now - timedelta(days=2)).isoformat(),
+        },
     ]
     histories = [
         {
@@ -96,6 +108,18 @@ async def test_mvp3_sla_cycle_and_focus_use_local_crm(tmp_path: Path) -> None:
             "ID": "104",
             "OWNER_ID": "4",
             "STAGE_ID": "C7:WON",
+            "CREATED_TIME": (now - timedelta(days=2)).isoformat(),
+        },
+        {
+            "ID": "105",
+            "OWNER_ID": "5",
+            "STAGE_ID": "C7:PREPARATION",
+            "CREATED_TIME": (now - timedelta(hours=100)).isoformat(),
+        },
+        {
+            "ID": "106",
+            "OWNER_ID": "5",
+            "STAGE_ID": "C7:FINAL_INVOICE",
             "CREATED_TIME": (now - timedelta(days=2)).isoformat(),
         },
     ]
@@ -131,7 +155,10 @@ async def test_mvp3_sla_cycle_and_focus_use_local_crm(tmp_path: Path) -> None:
     assert {item.deal_id for item in focus.deals} == {"1", "2", "3"}
 
     assert "72 ч" in format_stage_sla_report(sla)
-    assert "Квалификация → КП" in format_cycle_time_report(cycle)
+    cycle_text = format_cycle_time_report(cycle)
+    assert "Квалификация → КП" in cycle_text
+    assert "сейчас на квалификации без КП >72ч 1" in cycle_text
+    assert "Период 90 дней отбирается по дате закрытия WON" in cycle_text
     assert "focus-list" in format_focus_report(focus)
 
 
