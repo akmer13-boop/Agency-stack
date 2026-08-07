@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.2"
+    app_version: str = "0.4.3"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -76,6 +76,8 @@ class Settings(BaseSettings):
     rop_attention_days: int = Field(default=3, ge=1, le=365)
     rop_critical_days: int = Field(default=5, ge=1, le=365)
     rop_risk_limit: int = Field(default=20, ge=1, le=100)
+    rop_focus_limit: int = Field(default=20, ge=1, le=100)
+    rop_manager_min_closed_sample: int = Field(default=5, ge=1, le=100)
     rop_timezone: str = "Europe/Moscow"
     rop_included_category_ids: str = ""
     rop_excluded_stage_ids: str = ""
