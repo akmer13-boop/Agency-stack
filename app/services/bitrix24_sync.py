@@ -62,7 +62,7 @@ async def run_initial_bitrix_sync(settings: Settings) -> BitrixSyncResult:
     await store.initialize()
     run_id = await store.start_run()
     client = build_sync_client(settings)
-    limit = settings.bitrix24_sync_max_items_per_entity
+    limit = settings.bitrix24_sync_item_limit
     counts: dict[str, int] = {}
 
     try:
@@ -159,10 +159,13 @@ def _labels() -> dict[str, str]:
 
 def format_sync_result(result: BitrixSyncResult) -> str:
     labels = _labels()
-    lines = [f"Bitrix24 sync завершён. Run #{result.run_id}"]
+    lines = [f"Bitrix24 full sync завершён. Run #{result.run_id}"]
     for entity_type, count in result.counts.items():
         lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
-    lines.append("Данные сохранены только в локальную SQLite. Запись в Bitrix24 не выполнялась.")
+    lines.append(
+        "Пагинация пройдена до реального конца данных по ID-cursor. "
+        "Запись в Bitrix24 не выполнялась."
+    )
     return "\n".join(lines)
 
 
