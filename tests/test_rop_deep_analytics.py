@@ -112,4 +112,7 @@ async def test_deep_analytics_use_real_final_stages_and_movement(tmp_path: Path)
 
     assert "Высокая цена" in format_loss_report(losses)
     assert "stage aging" in format_stage_aging_report(aging)
-    assert "ID 10" in format_manager_report(managers)
+    manager_text = format_manager_report(managers)
+    assert "ID 10" in manager_text
+    assert "общий aging" in manager_text
+    assert "ФИО пока не подставляются" not in manager_text
