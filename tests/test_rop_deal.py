@@ -69,6 +69,7 @@ async def test_deal_drilldown_uses_local_deal_activities_history_and_identity(
                 "SUBJECT": "Последний звонок клиенту",
                 "COMPLETED": "Y",
                 "END_TIME": (now - timedelta(days=7)).isoformat(),
+                "DEADLINE": "9999-12-31T00:00:00+00:00",
                 "RESPONSIBLE_ID": "2320",
                 "LAST_UPDATED": (now - timedelta(days=7)).isoformat(),
             },
@@ -138,11 +139,14 @@ async def test_deal_drilldown_uses_local_deal_activities_history_and_identity(
     assert "Виктория Полякова · Продажи B2B" in text
     assert "КРИТИЧНО · Follow-up после КП" in text
     assert "Последний звонок клиенту" in text
+    assert "2026-08-02 12:00" in text
+    assert "9999" not in text
     assert "просрочка 2 дн." in text
 
     ai_text = format_deal_for_ai(report, timezone_name="UTC")
     assert "Последняя завершённая активность: Звонок" in ai_text
     assert "Последний звонок клиенту" not in ai_text
+    assert "9999" not in ai_text
     assert "тексты комментариев" in ai_text.lower()
 
 
