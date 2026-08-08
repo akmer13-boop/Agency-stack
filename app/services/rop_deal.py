@@ -28,6 +28,7 @@ _ACTIVITY_TYPE_LABELS = {
     "5": "Действие",
 }
 _TIMELINE_COMMENT_METHOD = "crm.timeline.comment.list"
+_TECHNICAL_FUTURE_YEAR = 2099
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +153,17 @@ def _datetime(value: Any) -> datetime | None:
     return result.astimezone(UTC)
 
 
+def _is_technical_future(value: datetime | None) -> bool:
+    return value is not None and value.year >= _TECHNICAL_FUTURE_YEAR
+
+
+def _usable_datetime(value: Any) -> datetime | None:
+    parsed = _datetime(value)
+    if _is_technical_future(parsed):
+        return None
+    return parsed
+
+
 def _is_completed(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -255,8 +267,10 @@ def _activity_type(item: dict[str, Any]) -> str:
 
 
 def _activity_event_at(item: dict[str, Any]) -> datetime | None:
-    for key in ("END_TIME", "START_TIME", "DEADLINE", "LAST_UPDATED", "CREATED"):
-        parsed = _datetime(item.get(key))
+    # Completed Bitrix activities can carry 9999-12-31 in DEADLINE as a sentinel.
+    # Prefer actual event/update timestamps and only use a real deadline as fallback.
+    for key in ("END_TIME", "START_TIME", "LAST_UPDATED", "CREATED", "DEADLINE"):
+        parsed = _usable_datetime(item.get(key))
         if parsed is not None:
             return parsed
     return None
@@ -264,7 +278,7 @@ def _activity_event_at(item: dict[str, Any]) -> datetime | None:
 
 def _activity_deadline(item: dict[str, Any]) -> datetime | None:
     for key in ("DEADLINE", "START_TIME", "END_TIME"):
-        parsed = _datetime(item.get(key))
+        parsed = _usable_datetime(item.get(key))
         if parsed is not None:
             return parsed
     return None
@@ -481,7 +495,9 @@ def _format_activity(
     parts = [activity.activity_type]
     if include_subject and activity.subject != "—":
         parts.append(activity.subject)
-    if activity.deadline is not None:
+    if activity.completed and activity.event_at is not None:
+        parts.append(_format_dt(activity.event_at, timezone_name))
+    elif activity.deadline is not None:
         parts.append(f"срок {_format_dt(activity.deadline, timezone_name)}")
     elif activity.event_at is not None:
         parts.append(_format_dt(activity.event_at, timezone_name))
@@ -640,10 +656,15 @@ def format_deal_for_ai(
 
     if report.next_open_activity is not None:
         next_activity = report.next_open_activity
-        deadline = _format_dt(next_activity.deadline, timezone_name)
+        if next_activity.deadline is not None:
+            next_time = f"срок {_format_dt(next_activity.deadline, timezone_name)}"
+        elif next_activity.event_at is not None:
+            next_time = _format_dt(next_activity.event_at, timezone_name)
+        else:
+            next_time = "срок не указан"
         lines.append(
             "Ближайшая незавершённая активность: "
-            f"{next_activity.activity_type}; срок {deadline}"
+            f"{next_activity.activity_type}; {next_time}"
         )
     else:
         lines.append("Ближайшая незавершённая активность: не найдена")
