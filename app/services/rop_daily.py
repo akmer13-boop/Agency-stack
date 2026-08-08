@@ -146,7 +146,7 @@ async def build_rop_daily(settings: Settings) -> str:
                 lines.append(
                     f"• {_employee(directory, manager_id)} | SLA-критично "
                     f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
-                    f"SLA-внимание {counters['attention']}"
+                    f"SLA-внимание (без критичных) {counters['attention']}"
                 )
                 continue
 
@@ -160,7 +160,7 @@ async def build_rop_daily(settings: Settings) -> str:
             lines.append(
                 f"• {_employee(directory, manager_id)} | SLA-критично "
                 f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
-                f"SLA-внимание {counters['attention']} | "
+                f"SLA-внимание (без критичных) {counters['attention']} | "
                 f"WON/LOST {manager_stat.month_won}/{manager_stat.month_lost} | {sample}"
             )
 
@@ -200,6 +200,7 @@ async def build_rop_daily(settings: Settings) -> str:
 
     lines.append(
         "\nManager ranking в этом Daily Brief использует только stage-specific SLA. "
+        "SLA-внимание означает жёлтую зону и не включает уже критичные карточки. "
         "Общий aging 3+/5+ из /rop_managers не считается SLA конкретной стадии."
     )
     lines.append(
