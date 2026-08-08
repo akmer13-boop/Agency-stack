@@ -27,6 +27,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_sla",
         "get_rop_cycle_time",
         "get_rop_focus",
+        "get_rop_deal",
     }
 
 
@@ -44,6 +45,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_sla" in names
     assert "get_rop_cycle_time" in names
     assert "get_rop_focus" in names
+    assert "get_rop_deal" in names
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
