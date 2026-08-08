@@ -93,7 +93,7 @@ async def test_local_directory_enriches_manager_ids(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_daily_brief_uses_local_employee_name(tmp_path: Path) -> None:
+async def test_daily_brief_uses_local_employee_name_and_stage_sla(tmp_path: Path) -> None:
     now = datetime.now(UTC)
     database_path = str(tmp_path / "agency.db")
     store = CrmStore(database_path)
@@ -136,4 +136,7 @@ async def test_daily_brief_uses_local_employee_name(tmp_path: Path) -> None:
     assert "ИИ-РОП · Daily Brief" in text
     assert "Иван Петров · B2C" in text
     assert "#100" in text
+    assert "Кого разбирать сегодня по stage-specific SLA:" in text
+    assert "SLA-критично 1" in text
+    assert "5+ дней" not in text
     assert "в LLM для этого отчёта не передаются" in text
