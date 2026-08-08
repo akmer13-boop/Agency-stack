@@ -412,7 +412,7 @@ def format_manager_report(
 ) -> str:
     lines = [
         "ИИ-РОП · карточки ответственных",
-        "Сортировка: сначала критические активные сделки 5+ дней.",
+        "Сортировка: общий aging активных сделок 5+ дней; это не stage-specific SLA.",
     ]
     for item in report.managers[:limit]:
         closed = item.month_won + item.month_lost
@@ -440,7 +440,11 @@ def format_manager_report(
         "за месяц: такая выборка слишком мала для вывода об эффективности."
     )
     lines.append(
-        "ФИО пока не подставляются: в локальной CRM есть ASSIGNED_BY_ID, "
-        "но справочник сотрудников ещё не синхронизирован."
+        "3+/5+ — общий aging, а не подтверждённое SLA-нарушение конкретной стадии. "
+        "Для stage-specific SLA используются /rop_sla, /rop_focus и /rop_daily."
+    )
+    lines.append(
+        "При наличии локального справочника Bitrix24 ФИО и отделы подставляются вместо "
+        "голых ASSIGNED_BY_ID; ID сохраняется для трассировки."
     )
     return "\n".join(lines)
