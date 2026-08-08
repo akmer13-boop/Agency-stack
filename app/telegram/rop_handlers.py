@@ -21,6 +21,7 @@ from app.services.rop_analytics import (
     format_rop_week,
 )
 from app.services.rop_daily import build_rop_daily
+from app.services.rop_deal import build_deal_drilldown, format_deal_drilldown
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -314,4 +315,38 @@ async def rop_daily_handler(
         return
     async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
         text = await build_rop_daily(settings)
+    await _send_long_text(message, text, settings)
+
+
+@router.message(Command("rop_deal"))
+async def rop_deal_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+
+    parts = (message.text or "").strip().split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].strip().isdigit():
+        await message.answer("Использование: /rop_deal 7040")
+        return
+
+    deal_id = parts[1].strip()
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        report = await build_deal_drilldown(
+            settings,
+            deal_id,
+            include_timeline_comments=True,
+        )
+    if report is None:
+        await message.answer(
+            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
+        )
+        return
+
+    text = format_deal_drilldown(
+        report,
+        timezone_name=settings.rop_timezone,
+    )
     await _send_long_text(message, text, settings)
