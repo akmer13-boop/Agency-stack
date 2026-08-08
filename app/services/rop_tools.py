@@ -15,6 +15,7 @@ from app.services.rop_analytics import (
     format_rop_today,
     format_rop_week,
 )
+from app.services.rop_deal import build_deal_drilldown, format_deal_for_ai
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -150,6 +151,27 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         )
         return format_focus_report(report)
 
+    @function_tool
+    async def get_rop_deal(deal_id: int) -> str:
+        """Return compact facts for one CRM deal ID from the local synchronized database.
+
+        Use this tool for questions about a specific deal, for example deal 7040. It returns
+        stage, amount, responsible manager, SLA state, activity timing and stage history.
+        Raw timeline comments, activity descriptions and client contacts are intentionally
+        excluded from the LLM tool output.
+
+        Args:
+            deal_id: Numeric Bitrix24 deal ID.
+        """
+        report = await build_deal_drilldown(
+            settings,
+            deal_id,
+            include_timeline_comments=False,
+        )
+        if report is None:
+            return f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
+        return format_deal_for_ai(report, timezone_name=settings.rop_timezone)
+
     return [
         get_rop_period,
         get_rop_pipeline,
@@ -161,4 +183,5 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_sla,
         get_rop_cycle_time,
         get_rop_focus,
+        get_rop_deal,
     ]
