@@ -138,5 +138,6 @@ async def test_daily_brief_uses_local_employee_name_and_stage_sla(tmp_path: Path
     assert "#100" in text
     assert "Кого разбирать сегодня по stage-specific SLA:" in text
     assert "SLA-критично 1" in text
+    assert "SLA-внимание (без критичных) 0" in text
     assert "5+ дней" not in text
     assert "в LLM для этого отчёта не передаются" in text
