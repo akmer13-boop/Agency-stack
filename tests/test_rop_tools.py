@@ -48,6 +48,15 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_deal" in names
 
 
+def test_manager_agent_has_grounded_deadline_guardrails() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "Не придумывай новые числовые дедлайны" in agent.instructions
+    assert "Не предлагай 'продлить SLA'" in agent.instructions
+    assert "называй это ручной проверкой" in agent.instructions
+
+
 def test_employee_agent_does_not_receive_rop_tools() -> None:
     settings = Settings(_env_file=None)
     agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.EMPLOYEE, settings)
