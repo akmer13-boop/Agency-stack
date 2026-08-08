@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from decimal import Decimal
 
 from app.config import Settings
@@ -40,9 +41,11 @@ async def build_rop_daily(settings: Settings) -> str:
         included_category_ids=settings.rop_included_categories,
         excluded_stage_ids=settings.rop_excluded_stages,
     )
+    # Daily manager prioritization must see the full SLA candidate set, not only the
+    # user-facing focus limit. The report itself still displays only a short top list.
     focus = await build_focus_report(
         settings.database_path,
-        limit=settings.rop_focus_limit,
+        limit=10_000,
         included_category_ids=settings.rop_included_categories,
         excluded_stage_ids=settings.rop_excluded_stages,
     )
@@ -105,23 +108,60 @@ async def build_rop_daily(settings: Settings) -> str:
                 f"{_employee(directory, item.assigned_by_id)}"
             )
 
-    lines.append("\nКого разбирать сегодня:")
-    manager_candidates = [item for item in managers.managers if item.critical_count > 0]
+    manager_by_id = {item.assigned_by_id: item for item in managers.managers}
+    sla_by_manager: defaultdict[str, dict[str, int]] = defaultdict(
+        lambda: {"critical": 0, "attention": 0, "critical_money": 0}
+    )
+    for item in focus.deals:
+        counters = sla_by_manager[item.assigned_by_id]
+        if item.severity == "critical":
+            counters["critical"] += 1
+            if item.business_bucket == "money":
+                counters["critical_money"] += 1
+        else:
+            counters["attention"] += 1
+
+    manager_candidates = [
+        (manager_id, counters, manager_by_id.get(manager_id))
+        for manager_id, counters in sla_by_manager.items()
+        if counters["critical"] > 0
+    ]
+    manager_candidates.sort(
+        key=lambda item: (
+            item[1]["critical"],
+            item[1]["critical_money"],
+            item[1]["attention"],
+            item[2].month_lost if item[2] is not None else 0,
+            item[2].active_count if item[2] is not None else 0,
+        ),
+        reverse=True,
+    )
+
+    lines.append("\nКого разбирать сегодня по stage-specific SLA:")
     if not manager_candidates:
-        lines.append("• менеджеров с критическими активными карточками не найдено")
+        lines.append("• менеджеров с SLA-критичными карточками не найдено")
     else:
-        for item in manager_candidates[:5]:
-            closed = item.month_won + item.month_lost
+        for manager_id, counters, manager_stat in manager_candidates[:5]:
+            if manager_stat is None:
+                lines.append(
+                    f"• {_employee(directory, manager_id)} | SLA-критично "
+                    f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
+                    f"SLA-внимание {counters['attention']}"
+                )
+                continue
+
+            closed = manager_stat.month_won + manager_stat.month_lost
             sample = (
                 f"закрытых {closed}, конверсия "
-                f"{100 * item.month_won / closed:.1f}%"
+                f"{100 * manager_stat.month_won / closed:.1f}%"
                 if closed >= settings.rop_manager_min_closed_sample
                 else f"закрытых {closed}, выборка мала"
             )
             lines.append(
-                f"• {_employee(directory, item.assigned_by_id)} | активных "
-                f"{item.active_count} | 5+ дней {item.critical_count} | "
-                f"WON/LOST {item.month_won}/{item.month_lost} | {sample}"
+                f"• {_employee(directory, manager_id)} | SLA-критично "
+                f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
+                f"SLA-внимание {counters['attention']} | "
+                f"WON/LOST {manager_stat.month_won}/{manager_stat.month_lost} | {sample}"
             )
 
     lines.extend(
@@ -145,10 +185,11 @@ async def build_rop_daily(settings: Settings) -> str:
             f"{top.age_days} дн. на текущей стадии."
         )
     if manager_candidates:
-        top_manager = manager_candidates[0]
+        manager_id, counters, _manager_stat = manager_candidates[0]
         lines.append(
-            f"2. Разобрать портфель {_employee(directory, top_manager.assigned_by_id)}: "
-            f"критических активных карточек {top_manager.critical_count}."
+            f"2. Разобрать портфель {_employee(directory, manager_id)}: "
+            f"SLA-критично {counters['critical']}, из них с суммой >1 "
+            f"{counters['critical_money']}."
         )
     if sla:
         top_sla = sla[0]
@@ -158,7 +199,11 @@ async def build_rop_daily(settings: Settings) -> str:
         )
 
     lines.append(
-        "\nФИО и отделы берутся из локального справочника Bitrix24. Сырые карточки CRM "
+        "\nManager ranking в этом Daily Brief использует только stage-specific SLA. "
+        "Общий aging 3+/5+ из /rop_managers не считается SLA конкретной стадии."
+    )
+    lines.append(
+        "ФИО и отделы берутся из локального справочника Bitrix24. Сырые карточки CRM "
         "и справочник сотрудников в LLM для этого отчёта не передаются."
     )
     return "\n".join(lines)
