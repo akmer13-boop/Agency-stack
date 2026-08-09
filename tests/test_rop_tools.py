@@ -75,7 +75,7 @@ def test_manager_agent_uses_recent_activity_tool_without_export() -> None:
     agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
     assert isinstance(agent.instructions, str)
     assert "обязательно используй get_rop_deal_activity" in agent.instructions
-    assert "За последнюю неделю" not in agent.instructions
+    assert "За последнюю неделю" in agent.instructions
     assert "rolling 7 дней" in agent.instructions
     assert "Не проси CSV/JSON" in agent.instructions
     assert "разные величины" in agent.instructions
