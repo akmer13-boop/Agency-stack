@@ -57,6 +57,15 @@ def test_manager_agent_has_grounded_deadline_guardrails() -> None:
     assert "называй это ручной проверкой" in agent.instructions
 
 
+def test_manager_agent_does_not_infer_missing_follow_up_from_stage_age() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "само по себе не доказывает отсутствие follow-up" in agent.instructions
+    assert "не пиши гипотезу 'follow-up не было'" in agent.instructions
+    assert "универсальные причины вроде цены" in agent.instructions
+
+
 def test_employee_agent_does_not_receive_rop_tools() -> None:
     settings = Settings(_env_file=None)
     agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.EMPLOYEE, settings)
