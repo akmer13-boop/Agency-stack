@@ -14,6 +14,7 @@ from app.telegram.bitrix_sync_handlers import router as bitrix_sync_router
 from app.telegram.handlers import router
 from app.telegram.rate_limit import UserRateLimiter
 from app.telegram.rop_handlers import router as rop_router
+from app.telegram.rop_lead_handlers import router as rop_lead_router
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ async def run_telegram_bot() -> None:
     dispatcher.include_router(bitrix_inventory_router)
     dispatcher.include_router(bitrix_sync_router)
     dispatcher.include_router(rop_router)
+    dispatcher.include_router(rop_lead_router)
     dispatcher.include_router(router)
     rate_limiter = UserRateLimiter(settings.telegram_request_cooldown_seconds)
 
