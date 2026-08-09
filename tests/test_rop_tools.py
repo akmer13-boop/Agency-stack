@@ -64,6 +64,8 @@ def test_manager_agent_does_not_infer_missing_follow_up_from_stage_age() -> None
     assert "само по себе не доказывает отсутствие follow-up" in agent.instructions
     assert "не пиши гипотезу 'follow-up не было'" in agent.instructions
     assert "универсальные причины вроде цены" in agent.instructions
+    assert "три независимых сигнала" in agent.instructions
+    assert "не соответствие отдельному SLA коммуникационной паузы" in agent.instructions
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
