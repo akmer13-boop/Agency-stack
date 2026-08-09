@@ -16,6 +16,10 @@ from app.services.rop_analytics import (
     format_rop_week,
 )
 from app.services.rop_deal import build_deal_drilldown, format_deal_for_ai
+from app.services.rop_deal_evidence import (
+    build_deal_stage_evidence,
+    format_deal_stage_evidence_for_ai,
+)
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -153,10 +157,11 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_deal(deal_id: int) -> str:
-        """Return compact facts for one CRM deal ID from the local synchronized database.
+        """Return compact facts and stage evidence for one CRM deal ID.
 
         Use this tool for questions about a specific deal, for example deal 7040. It returns
-        stage, amount, responsible manager, SLA state, activity timing and stage history.
+        stage, amount, responsible manager, SLA state, activity timing, stage history and
+        aggregate evidence about activities recorded after entry to the current stage.
         Raw timeline comments, activity descriptions and client contacts are intentionally
         excluded from the LLM tool output.
 
@@ -170,7 +175,14 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         )
         if report is None:
             return f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
-        return format_deal_for_ai(report, timezone_name=settings.rop_timezone)
+        evidence = await build_deal_stage_evidence(settings, report)
+        base = format_deal_for_ai(report, timezone_name=settings.rop_timezone)
+        stage_evidence = format_deal_stage_evidence_for_ai(
+            report,
+            evidence,
+            timezone_name=settings.rop_timezone,
+        )
+        return f"{base}\n\n{stage_evidence}"
 
     return [
         get_rop_period,
