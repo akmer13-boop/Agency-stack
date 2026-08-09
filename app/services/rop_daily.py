@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from app.config import Settings
 from app.services.rop_activity_risk import (
+    ActivityAwareDealRisk,
     build_activity_aware_risk,
     format_activity_aware_risk_compact,
 )
@@ -12,6 +13,11 @@ from app.services.rop_analytics import build_rop_snapshot
 from app.services.rop_catalog import category_label, stage_label
 from app.services.rop_deal import build_deal_drilldown
 from app.services.rop_deal_evidence import build_deal_stage_evidence
+from app.services.rop_deal_vitality import (
+    DealVitality,
+    build_deal_vitality,
+    format_deal_vitality_compact,
+)
 from app.services.rop_deep_analytics import build_manager_report
 from app.services.rop_directory import RopDirectory, employee_label, load_rop_directory
 from app.services.rop_mvp3 import build_focus_report, build_stage_sla_report
@@ -30,6 +36,26 @@ def _closed_conversion(won: int, lost: int) -> str:
 
 def _employee(directory: RopDirectory, user_id: str) -> str:
     return employee_label(directory, user_id, include_id=False)
+
+
+async def _build_top_deal_context(
+    settings: Settings,
+    deal_ids: list[str],
+) -> dict[str, tuple[ActivityAwareDealRisk, DealVitality]]:
+    result: dict[str, tuple[ActivityAwareDealRisk, DealVitality]] = {}
+    for deal_id in deal_ids:
+        report = await build_deal_drilldown(
+            settings,
+            deal_id,
+            include_timeline_comments=False,
+        )
+        if report is None:
+            continue
+        evidence = await build_deal_stage_evidence(settings, report)
+        risk = build_activity_aware_risk(report, evidence)
+        vitality = build_deal_vitality(report, risk)
+        result[deal_id] = (risk, vitality)
+    return result
 
 
 async def build_rop_daily(settings: Settings) -> str:
@@ -100,6 +126,10 @@ async def build_rop_daily(settings: Settings) -> str:
 
     money = [item for item in focus.deals if item.business_bucket == "money"]
     hygiene = [item for item in focus.deals if item.business_bucket == "hygiene"]
+    top_context = await _build_top_deal_context(
+        settings,
+        [item.deal_id for item in money[:3]],
+    )
 
     lines.append("\nСделки для вмешательства сегодня:")
     if not money:
@@ -107,34 +137,41 @@ async def build_rop_daily(settings: Settings) -> str:
     else:
         for item in money[:5]:
             severity = "КРИТИЧНО" if item.severity == "critical" else "ВНИМАНИЕ"
+            context = top_context.get(item.deal_id)
+            vitality_suffix = ""
+            if context is not None:
+                vitality_suffix = (
+                    " | " + format_deal_vitality_compact(context[1])
+                )
             lines.append(
                 f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
                 f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
                 f"{_money(item.opportunity)} {item.currency} | "
-                f"{_employee(directory, item.assigned_by_id)}"
+                f"{_employee(directory, item.assigned_by_id)}{vitality_suffix}"
             )
 
-        lines.append("\nActivity-aware сигналы по top-3 сделкам:")
-        risk_cards = 0
-        for item in money[:3]:
-            report = await build_deal_drilldown(
-                settings,
-                item.deal_id,
-                include_timeline_comments=False,
-            )
-            if report is None:
-                continue
-            evidence = await build_deal_stage_evidence(settings, report)
-            risk = build_activity_aware_risk(report, evidence)
-            lines.append(
-                f"• #{item.deal_id} | {format_activity_aware_risk_compact(risk)}"
-            )
-            risk_cards += 1
-        if risk_cards == 0:
-            lines.append("• детальные activity-aware сигналы не удалось построить")
+        lines.append("\nActivity-aware + vitality сигналы по top-3 сделкам:")
+        if not top_context:
+            lines.append("• детальные сигналы не удалось построить")
+        else:
+            for item in money[:3]:
+                context = top_context.get(item.deal_id)
+                if context is None:
+                    continue
+                risk, vitality = context
+                lines.append(
+                    f"• #{item.deal_id} | {format_activity_aware_risk_compact(risk)}"
+                )
+                lines.append(
+                    f"  {format_deal_vitality_compact(vitality)}"
+                )
         lines.append(
-            "• дни с последней коммуникации здесь являются фактом, а не отдельным SLA: "
+            "• дни с последней коммуникации являются фактом, а не отдельным SLA: "
             "норматив допустимой паузы между контактами пока не задан."
+        )
+        lines.append(
+            "• неподтверждённый pipeline означает: сумма есть в CRM, но актуальность "
+            "сделки надо подтвердить до управленческой трактовки как рабочего pipeline."
         )
 
     manager_by_id = {item.assigned_by_id: item for item in managers.managers}
@@ -209,10 +246,19 @@ async def build_rop_daily(settings: Settings) -> str:
     lines.append("\nПриоритет действий:")
     if money:
         top = money[0]
-        lines.append(
-            f"1. Проверить сделку #{top.deal_id}: {top.rule_label}, "
-            f"{top.age_days} дн. на текущей стадии."
-        )
+        context = top_context.get(top.deal_id)
+        vitality = context[1] if context is not None else None
+        if vitality is not None and vitality.pipeline_confidence == "unconfirmed":
+            lines.append(
+                f"1. Сначала подтвердить актуальность сделки #{top.deal_id}: "
+                f"{_money(top.opportunity)} {top.currency} пока считается "
+                "неподтверждённым pipeline для управленческого решения."
+            )
+        else:
+            lines.append(
+                f"1. Проверить сделку #{top.deal_id}: {top.rule_label}, "
+                f"{top.age_days} дн. на текущей стадии."
+            )
     if manager_candidates:
         manager_id, counters, _manager_stat = manager_candidates[0]
         lines.append(
@@ -231,6 +277,10 @@ async def build_rop_daily(settings: Settings) -> str:
         "\nManager ranking в этом Daily Brief использует только stage-specific SLA. "
         "SLA-внимание означает жёлтую зону и не включает уже критичные карточки. "
         "Общий aging 3+/5+ из /rop_managers не считается SLA конкретной стадии."
+    )
+    lines.append(
+        "Deal vitality не является вероятностью продажи и не закрывает сделки автоматически. "
+        "Он отделяет рабочие сигналы от карточек, актуальность которых надо подтвердить."
     )
     lines.append(
         "ФИО и отделы берутся из локального справочника Bitrix24. Сырые карточки CRM "
