@@ -30,6 +30,10 @@ from app.services.rop_deal_evidence import (
     build_deal_stage_evidence,
     format_deal_stage_evidence,
 )
+from app.services.rop_deal_vitality import (
+    build_deal_vitality,
+    format_deal_vitality,
+)
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -51,6 +55,10 @@ from app.services.rop_mvp3 import (
     format_cycle_time_report,
     format_focus_report,
     format_stage_sla_report,
+)
+from app.services.rop_recent_activity import (
+    build_recent_deal_activity,
+    format_recent_deal_activity,
 )
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
@@ -357,7 +365,12 @@ async def rop_deal_handler(
             if report is not None and evidence is not None
             else None
         )
-    if report is None or evidence is None or risk is None:
+        vitality = (
+            build_deal_vitality(report, risk)
+            if report is not None and risk is not None
+            else None
+        )
+    if report is None or evidence is None or risk is None or vitality is None:
         await message.answer(
             f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
         )
@@ -373,8 +386,59 @@ async def rop_deal_handler(
         timezone_name=settings.rop_timezone,
     )
     risk_text = format_activity_aware_risk(risk)
+    vitality_text = format_deal_vitality(vitality)
     await _send_long_text(
         message,
-        f"{base_text}\n\n{evidence_text}\n\n{risk_text}",
+        f"{base_text}\n\n{evidence_text}\n\n{risk_text}\n\n{vitality_text}",
         settings,
     )
+
+
+@router.message(Command("rop_deal_activity"))
+async def rop_deal_activity_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+
+    parts = (message.text or "").strip().split()
+    if len(parts) not in {2, 3} or not parts[1].isdigit():
+        await message.answer("Использование: /rop_deal_activity 7040 7")
+        return
+
+    deal_id = parts[1]
+    days = 7
+    if len(parts) == 3:
+        if not parts[2].isdigit():
+            await message.answer("Период должен быть числом дней: от 1 до 365.")
+            return
+        days = int(parts[2])
+    if days < 1 or days > 365:
+        await message.answer("Период должен быть от 1 до 365 дней.")
+        return
+
+    async with ChatActionSender.typing(bot=message.bot, chat_id=message.chat.id):
+        report = await build_deal_drilldown(
+            settings,
+            deal_id,
+            include_timeline_comments=False,
+        )
+        activity = (
+            await build_recent_deal_activity(settings, report, days)
+            if report is not None
+            else None
+        )
+    if report is None or activity is None:
+        await message.answer(
+            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
+        )
+        return
+
+    text = format_recent_deal_activity(
+        report,
+        activity,
+        timezone_name=settings.rop_timezone,
+    )
+    await _send_long_text(message, text, settings)
