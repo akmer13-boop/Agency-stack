@@ -5,6 +5,10 @@ from typing import Literal
 from agents import FunctionTool, function_tool
 
 from app.config import Settings
+from app.services.rop_activity_risk import (
+    build_activity_aware_risk,
+    format_activity_aware_risk_for_ai,
+)
 from app.services.rop_analytics import (
     RopSnapshot,
     build_rop_snapshot,
@@ -157,13 +161,13 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_deal(deal_id: int) -> str:
-        """Return compact facts and stage evidence for one CRM deal ID.
+        """Return compact facts, stage evidence and activity-aware risk for one CRM deal ID.
 
         Use this tool for questions about a specific deal, for example deal 7040. It returns
-        stage, amount, responsible manager, SLA state, activity timing, stage history and
-        aggregate evidence about activities recorded after entry to the current stage.
-        Raw timeline comments, activity descriptions and client contacts are intentionally
-        excluded from the LLM tool output.
+        stage, amount, responsible manager, SLA state, activity timing, stage history,
+        aggregate evidence after entry to the current stage, and independent stage / 
+        communication / next-action risk signals. Raw timeline comments, activity
+        descriptions and client contacts are intentionally excluded from the LLM tool output.
 
         Args:
             deal_id: Numeric Bitrix24 deal ID.
@@ -176,13 +180,15 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         if report is None:
             return f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
         evidence = await build_deal_stage_evidence(settings, report)
+        risk = build_activity_aware_risk(report, evidence)
         base = format_deal_for_ai(report, timezone_name=settings.rop_timezone)
         stage_evidence = format_deal_stage_evidence_for_ai(
             report,
             evidence,
             timezone_name=settings.rop_timezone,
         )
-        return f"{base}\n\n{stage_evidence}"
+        risk_text = format_activity_aware_risk_for_ai(risk)
+        return f"{base}\n\n{stage_evidence}\n\n{risk_text}"
 
     return [
         get_rop_period,
