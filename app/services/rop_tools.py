@@ -24,6 +24,10 @@ from app.services.rop_deal_evidence import (
     build_deal_stage_evidence,
     format_deal_stage_evidence_for_ai,
 )
+from app.services.rop_deal_vitality import (
+    build_deal_vitality,
+    format_deal_vitality_for_ai,
+)
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -39,6 +43,10 @@ from app.services.rop_mvp3 import (
     format_cycle_time_report,
     format_focus_report,
     format_stage_sla_report,
+)
+from app.services.rop_recent_activity import (
+    build_recent_deal_activity,
+    format_recent_deal_activity_for_ai,
 )
 
 
@@ -161,13 +169,12 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_deal(deal_id: int) -> str:
-        """Return compact facts, stage evidence and activity-aware risk for one CRM deal ID.
+        """Return compact facts, evidence, vitality and risk for one CRM deal ID.
 
-        Use this tool for questions about a specific deal, for example deal 7040. It returns
-        stage, amount, responsible manager, SLA state, activity timing, stage history,
-        aggregate evidence after entry to the current stage, and independent stage / 
-        communication / next-action risk signals. Raw timeline comments, activity
-        descriptions and client contacts are intentionally excluded from the LLM tool output.
+        Use this tool for current status of a specific deal. It returns stage, amount,
+        responsible manager, stage evidence, activity-aware risk and conservative deal
+        vitality. Raw timeline comments, activity descriptions and client contacts are
+        intentionally excluded from the LLM tool output.
 
         Args:
             deal_id: Numeric Bitrix24 deal ID.
@@ -181,6 +188,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             return f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
         evidence = await build_deal_stage_evidence(settings, report)
         risk = build_activity_aware_risk(report, evidence)
+        vitality = build_deal_vitality(report, risk)
         base = format_deal_for_ai(report, timezone_name=settings.rop_timezone)
         stage_evidence = format_deal_stage_evidence_for_ai(
             report,
@@ -188,7 +196,37 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             timezone_name=settings.rop_timezone,
         )
         risk_text = format_activity_aware_risk_for_ai(risk)
-        return f"{base}\n\n{stage_evidence}\n\n{risk_text}"
+        vitality_text = format_deal_vitality_for_ai(vitality)
+        return f"{base}\n\n{stage_evidence}\n\n{risk_text}\n\n{vitality_text}"
+
+    @function_tool
+    async def get_rop_deal_activity(deal_id: int, days: int = 7) -> str:
+        """Return exact local CRM activity counts for one deal over the last N days.
+
+        Use this tool when the user asks what happened recently on a specific deal: last
+        week, last 7/14/30 days, recent e-mails/calls/tasks, or whether any recent contact
+        was recorded. The window is rolling N×24 hours. Unknown activity types are kept in
+        total counts but are not treated as communications unless explicitly classified.
+
+        Args:
+            deal_id: Numeric Bitrix24 deal ID.
+            days: Rolling lookback window from 1 to 365 days.
+        """
+        if days < 1 or days > 365:
+            return "Период recent activity должен быть от 1 до 365 дней."
+        report = await build_deal_drilldown(
+            settings,
+            deal_id,
+            include_timeline_comments=False,
+        )
+        if report is None:
+            return f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
+        activity = await build_recent_deal_activity(settings, report, days)
+        return format_recent_deal_activity_for_ai(
+            report,
+            activity,
+            timezone_name=settings.rop_timezone,
+        )
 
     return [
         get_rop_period,
@@ -202,4 +240,5 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_cycle_time,
         get_rop_focus,
         get_rop_deal,
+        get_rop_deal_activity,
     ]
