@@ -58,7 +58,11 @@ def build_activity_aware_risk(
 
 
 def _stage_line(risk: ActivityAwareDealRisk) -> str:
-    age = f"{risk.stage_age_days} дн." if risk.stage_age_days is not None else "возраст не установлен"
+    age = (
+        f"{risk.stage_age_days} дн."
+        if risk.stage_age_days is not None
+        else "возраст не установлен"
+    )
     rule = f" · {risk.stage_rule_label}" if risk.stage_rule_label else ""
     if risk.stage_risk == "critical":
         return f"🔴 Stage risk: КРИТИЧНО · {age}{rule}"
@@ -149,10 +153,11 @@ def format_activity_aware_risk(risk: ActivityAwareDealRisk) -> str:
 
 
 def format_activity_aware_risk_compact(risk: ActivityAwareDealRisk) -> str:
+    stage_age = risk.stage_age_days if risk.stage_age_days is not None else "—"
     if risk.stage_risk == "critical":
-        stage = f"🔴 стадия {risk.stage_age_days if risk.stage_age_days is not None else '—'} дн."
+        stage = f"🔴 стадия {stage_age} дн."
     elif risk.stage_risk == "attention":
-        stage = f"🟡 стадия {risk.stage_age_days if risk.stage_age_days is not None else '—'} дн."
+        stage = f"🟡 стадия {stage_age} дн."
     else:
         stage = "⚪ stage SLA не измеряется"
 
@@ -178,18 +183,27 @@ def format_activity_aware_risk_compact(risk: ActivityAwareDealRisk) -> str:
 
 
 def format_activity_aware_risk_for_ai(risk: ActivityAwareDealRisk) -> str:
+    communications = (
+        risk.communications_after_stage
+        if risk.communications_after_stage is not None
+        else "unknown"
+    )
+    communication_age = (
+        risk.days_since_last_communication
+        if risk.days_since_last_communication is not None
+        else "unknown"
+    )
+    next_open = "missing" if risk.next_action_state == "missing" else "present"
     lines = [
         f"ACTIVITY-AWARE RISK сделки #{risk.deal_id}",
         f"Stage risk: {risk.stage_risk}",
         f"Stage age days: {risk.stage_age_days if risk.stage_age_days is not None else 'unknown'}",
         f"Stage rule: {risk.stage_rule_label or 'none'}",
         f"Communication evidence: {risk.communication_evidence}",
-        "Completed communications after stage entry: "
-        f"{risk.communications_after_stage if risk.communications_after_stage is not None else 'unknown'}",
+        f"Completed communications after stage entry: {communications}",
         f"Last communication type: {risk.last_communication_type or 'unknown'}",
-        "Days since last completed communication: "
-        f"{risk.days_since_last_communication if risk.days_since_last_communication is not None else 'unknown'}",
-        f"Next open activity: {'missing' if risk.next_action_state == 'missing' else 'present'}",
+        f"Days since last completed communication: {communication_age}",
+        f"Next open activity: {next_open}",
         "Deterministic diagnosis:",
     ]
     lines.extend(f"- {item}" for item in _diagnosis_lines(risk))
