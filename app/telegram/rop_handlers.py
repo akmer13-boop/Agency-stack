@@ -10,6 +10,10 @@ from aiogram.utils.chat_action import ChatActionSender
 from app.config import Settings
 from app.domain import UserRole
 from app.integrations.bitrix24 import Bitrix24ConfigurationError, Bitrix24RequestError
+from app.services.rop_activity_risk import (
+    build_activity_aware_risk,
+    format_activity_aware_risk,
+)
 from app.services.rop_analytics import (
     RopSnapshot,
     build_rop_snapshot,
@@ -348,7 +352,12 @@ async def rop_deal_handler(
             if report is not None
             else None
         )
-    if report is None or evidence is None:
+        risk = (
+            build_activity_aware_risk(report, evidence)
+            if report is not None and evidence is not None
+            else None
+        )
+    if report is None or evidence is None or risk is None:
         await message.answer(
             f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
         )
@@ -363,4 +372,9 @@ async def rop_deal_handler(
         evidence,
         timezone_name=settings.rop_timezone,
     )
-    await _send_long_text(message, f"{base_text}\n\n{evidence_text}", settings)
+    risk_text = format_activity_aware_risk(risk)
+    await _send_long_text(
+        message,
+        f"{base_text}\n\n{evidence_text}\n\n{risk_text}",
+        settings,
+    )
