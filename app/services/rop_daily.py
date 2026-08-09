@@ -4,8 +4,14 @@ from collections import defaultdict
 from decimal import Decimal
 
 from app.config import Settings
+from app.services.rop_activity_risk import (
+    build_activity_aware_risk,
+    format_activity_aware_risk_compact,
+)
 from app.services.rop_analytics import build_rop_snapshot
 from app.services.rop_catalog import category_label, stage_label
+from app.services.rop_deal import build_deal_drilldown
+from app.services.rop_deal_evidence import build_deal_stage_evidence
 from app.services.rop_deep_analytics import build_manager_report
 from app.services.rop_directory import RopDirectory, employee_label, load_rop_directory
 from app.services.rop_mvp3 import build_focus_report, build_stage_sla_report
@@ -107,6 +113,29 @@ async def build_rop_daily(settings: Settings) -> str:
                 f"{_money(item.opportunity)} {item.currency} | "
                 f"{_employee(directory, item.assigned_by_id)}"
             )
+
+        lines.append("\nActivity-aware сигналы по top-3 сделкам:")
+        risk_cards = 0
+        for item in money[:3]:
+            report = await build_deal_drilldown(
+                settings,
+                item.deal_id,
+                include_timeline_comments=False,
+            )
+            if report is None:
+                continue
+            evidence = await build_deal_stage_evidence(settings, report)
+            risk = build_activity_aware_risk(report, evidence)
+            lines.append(
+                f"• #{item.deal_id} | {format_activity_aware_risk_compact(risk)}"
+            )
+            risk_cards += 1
+        if risk_cards == 0:
+            lines.append("• детальные activity-aware сигналы не удалось построить")
+        lines.append(
+            "• дни с последней коммуникации здесь являются фактом, а не отдельным SLA: "
+            "норматив допустимой паузы между контактами пока не задан."
+        )
 
     manager_by_id = {item.assigned_by_id: item for item in managers.managers}
     sla_by_manager: defaultdict[str, dict[str, int]] = defaultdict(
