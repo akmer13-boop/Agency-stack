@@ -36,6 +36,8 @@ from app.services.rop_deep_analytics import (
     format_manager_report,
     format_stage_aging_report,
 )
+from app.services.rop_directory import enrich_responsible_ids, load_rop_directory
+from app.services.rop_leads import build_lead_intelligence, format_lead_intelligence_for_ai
 from app.services.rop_mvp3 import (
     build_cycle_time_report,
     build_focus_report,
@@ -60,6 +62,11 @@ async def _build_snapshot(settings: Settings) -> RopSnapshot:
         included_category_ids=settings.rop_included_categories,
         excluded_stage_ids=settings.rop_excluded_stages,
     )
+
+
+async def _enrich_with_directory(settings: Settings, text: str) -> str:
+    directory = await load_rop_directory(settings.database_path)
+    return enrich_responsible_ids(text, directory)
 
 
 def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
@@ -105,7 +112,8 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-        return format_loss_report(report)
+        text = format_loss_report(report)
+        return await _enrich_with_directory(settings, text)
 
     @function_tool
     async def get_rop_stage_aging() -> str:
@@ -121,7 +129,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_managers() -> str:
-        """Return manager scorecards by ASSIGNED_BY_ID from local synchronized CRM."""
+        """Return manager scorecards with local FIO/department when directory is synced."""
         report = await build_manager_report(
             settings.database_path,
             timezone_name=settings.rop_timezone,
@@ -130,10 +138,11 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-        return format_manager_report(
+        text = format_manager_report(
             report,
             min_closed_sample=settings.rop_manager_min_closed_sample,
         )
+        return await _enrich_with_directory(settings, text)
 
     @function_tool
     async def get_rop_sla() -> str:
@@ -165,7 +174,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             included_category_ids=settings.rop_included_categories,
             excluded_stage_ids=settings.rop_excluded_stages,
         )
-        return format_focus_report(report)
+        return await _enrich_with_directory(settings, format_focus_report(report))
 
     @function_tool
     async def get_rop_deal(deal_id: int) -> str:
@@ -228,6 +237,28 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             timezone_name=settings.rop_timezone,
         )
 
+    @function_tool
+    async def get_rop_leads(days: int = 7) -> str:
+        """Return Lead Intelligence for the rolling last N days.
+
+        Use this tool for lead-focused questions: what happened with leads recently,
+        current lead statuses, successful/failed lead finalizations, lead aging, sources,
+        lead CRM activity, and manager lead workload. It does not infer lead-to-deal cohort
+        conversion by dividing new deals by new leads.
+
+        Args:
+            days: Rolling lookback window from 1 to 365 days.
+        """
+        if days < 1 or days > 365:
+            return "Период Lead Intelligence должен быть от 1 до 365 дней."
+        report = await build_lead_intelligence(settings, days)
+        directory = await load_rop_directory(settings.database_path)
+        return format_lead_intelligence_for_ai(
+            report,
+            directory,
+            timezone_name=settings.rop_timezone,
+        )
+
     return [
         get_rop_period,
         get_rop_pipeline,
@@ -241,4 +272,5 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_focus,
         get_rop_deal,
         get_rop_deal_activity,
+        get_rop_leads,
     ]
