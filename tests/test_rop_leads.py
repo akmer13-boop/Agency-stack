@@ -209,4 +209,4 @@ async def test_lead_intelligence_builds_grounded_rolling_window(tmp_path: Path) 
     ai_text = format_lead_intelligence_for_ai(report, directory)
     assert "SECRET LEAD" not in ai_text
     assert "lead→deal conversion" in ai_text
-    assert "не называй менеджера худшим без явной метрики" in ai_text
+    assert "Не называй менеджера худшим без явной метрики" in ai_text
