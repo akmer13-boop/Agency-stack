@@ -28,6 +28,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_cycle_time",
         "get_rop_focus",
         "get_rop_deal",
+        "get_rop_deal_activity",
     }
 
 
@@ -46,6 +47,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_cycle_time" in names
     assert "get_rop_focus" in names
     assert "get_rop_deal" in names
+    assert "get_rop_deal_activity" in names
 
 
 def test_manager_agent_has_grounded_deadline_guardrails() -> None:
@@ -66,6 +68,26 @@ def test_manager_agent_does_not_infer_missing_follow_up_from_stage_age() -> None
     assert "универсальные причины вроде цены" in agent.instructions
     assert "три независимых сигнала" in agent.instructions
     assert "не соответствие отдельному SLA коммуникационной паузы" in agent.instructions
+
+
+def test_manager_agent_uses_recent_activity_tool_without_export() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "обязательно используй get_rop_deal_activity" in agent.instructions
+    assert "За последнюю неделю" not in agent.instructions
+    assert "rolling 7 дней" in agent.instructions
+    assert "Не проси CSV/JSON" in agent.instructions
+    assert "разные величины" in agent.instructions
+
+
+def test_manager_agent_verifies_unconfirmed_pipeline_before_follow_up() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "первым управленческим действием рекомендуй подтвердить" in agent.instructions
+    assert "неподтверждённым pipeline" in agent.instructions
+    assert "Не называй сделку мёртвой" in agent.instructions
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
