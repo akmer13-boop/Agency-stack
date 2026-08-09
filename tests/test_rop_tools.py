@@ -29,6 +29,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_focus",
         "get_rop_deal",
         "get_rop_deal_activity",
+        "get_rop_leads",
     }
 
 
@@ -48,6 +49,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_focus" in names
     assert "get_rop_deal" in names
     assert "get_rop_deal_activity" in names
+    assert "get_rop_leads" in names
 
 
 def test_manager_agent_has_grounded_deadline_guardrails() -> None:
@@ -75,7 +77,6 @@ def test_manager_agent_uses_recent_activity_tool_without_export() -> None:
     agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
     assert isinstance(agent.instructions, str)
     assert "обязательно используй get_rop_deal_activity" in agent.instructions
-    assert "За последнюю неделю" in agent.instructions
     assert "rolling 7 дней" in agent.instructions
     assert "Не проси CSV/JSON" in agent.instructions
     assert "разные величины" in agent.instructions
@@ -88,6 +89,24 @@ def test_manager_agent_verifies_unconfirmed_pipeline_before_follow_up() -> None:
     assert "первым управленческим действием рекомендуй подтвердить" in agent.instructions
     assert "неподтверждённым pipeline" in agent.instructions
     assert "Не называй сделку мёртвой" in agent.instructions
+
+
+def test_manager_agent_routes_lead_questions_to_lead_intelligence() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "обязательно используй get_rop_leads" in agent.instructions
+    assert "не одна когорта" in agent.instructions
+    assert "First-response SLA по лидам не выводи" in agent.instructions
+    assert "не проси у пользователя соответствие ID→ФИО" in agent.instructions
+
+
+def test_manager_agent_names_metric_before_judging_manager() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "только вместе с конкретной метрикой" in agent.instructions
+    assert "не выдумывай причину результата" in agent.instructions
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
