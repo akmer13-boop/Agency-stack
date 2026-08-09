@@ -80,7 +80,7 @@ def _activity_type_id(item: dict[str, Any]) -> str:
 
 
 def _activity_type_label(type_id: str) -> str:
-    return _ACTIVITY_TYPE_LABELS.get(type_id, f"Тип {type_id}")
+    return _ACTIVITY_TYPE_LABELS.get(type_id, f"Другой тип (ID {type_id})")
 
 
 def _activity_timestamp(item: dict[str, Any], *, completed: bool) -> datetime | None:
