@@ -22,6 +22,10 @@ from app.services.rop_analytics import (
 )
 from app.services.rop_daily import build_rop_daily
 from app.services.rop_deal import build_deal_drilldown, format_deal_drilldown
+from app.services.rop_deal_evidence import (
+    build_deal_stage_evidence,
+    format_deal_stage_evidence,
+)
 from app.services.rop_deep_analytics import (
     build_loss_report,
     build_manager_report,
@@ -339,14 +343,24 @@ async def rop_deal_handler(
             deal_id,
             include_timeline_comments=True,
         )
-    if report is None:
+        evidence = (
+            await build_deal_stage_evidence(settings, report)
+            if report is not None
+            else None
+        )
+    if report is None or evidence is None:
         await message.answer(
             f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
         )
         return
 
-    text = format_deal_drilldown(
+    base_text = format_deal_drilldown(
         report,
         timezone_name=settings.rop_timezone,
     )
-    await _send_long_text(message, text, settings)
+    evidence_text = format_deal_stage_evidence(
+        report,
+        evidence,
+        timezone_name=settings.rop_timezone,
+    )
+    await _send_long_text(message, f"{base_text}\n\n{evidence_text}", settings)
