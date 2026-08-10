@@ -31,6 +31,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_deal_activity",
         "get_rop_leads",
         "get_rop_lead_response_evidence",
+        "get_rop_lead_response_trend",
         "get_rop_first_response_policy",
         "get_rop_weekend_leads",
     }
@@ -54,6 +55,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_deal_activity" in names
     assert "get_rop_leads" in names
     assert "get_rop_lead_response_evidence" in names
+    assert "get_rop_lead_response_trend" in names
     assert "get_rop_first_response_policy" in names
     assert "get_rop_weekend_leads" in names
 
@@ -105,6 +107,8 @@ def test_manager_agent_routes_lead_questions_to_lead_intelligence() -> None:
     assert "обязательно используй get_rop_leads" in agent.instructions
     assert "Не подменяй lead-focused вопрос общим get_rop_period" in agent.instructions
     assert "используй get_rop_lead_response_evidence" in agent.instructions
+    assert "используй get_rop_lead_response_trend" in agent.instructions
+    assert "статистически значимым улучшением/ухудшением" in agent.instructions
     assert "не First Response SLA" in agent.instructions
     assert "Рабочие часы, выходные, праздники, reassignment" in agent.instructions
     assert "используй get_rop_first_response_policy" in agent.instructions
