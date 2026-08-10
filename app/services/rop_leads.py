@@ -13,10 +13,14 @@ from app.config import Settings
 from app.integrations.bitrix24 import Bitrix24RequestError
 from app.integrations.bitrix24.client import Bitrix24ReadOnlyClient
 from app.proxy import build_proxy_url
+from app.semantic.activity_classifier import (
+    ActivityClassification,
+    classify_activity,
+)
+from app.semantic.normalizer import normalize_activity
 from app.services.rop_directory import RopDirectory, employee_label, load_rop_directory
 from app.storage.crm_store import CrmStore
 
-_COMMUNICATION_TYPE_IDS = frozenset({"1", "2", "4"})
 _ACTIVITY_TYPE_LABELS = {
     "0": "Активность",
     "1": "Встреча",
@@ -83,6 +87,10 @@ class LeadIntelligenceReport:
     managers: tuple[LeadManagerStat, ...]
     catalog_loaded: bool
     history_schema_ready: bool
+    manager_evidence_events: int = 0
+    human_actions: int = 0
+    system_activities: int = 0
+    unknown_activities: int = 0
 
 
 async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str, Any]]:
@@ -290,8 +298,7 @@ def _last_lead_movement(
     history_times = [
         value
         for value in (
-            _datetime(item.get("CREATED_TIME"))
-            for item in history_by_owner.get(lead_id, [])
+            _datetime(item.get("CREATED_TIME")) for item in history_by_owner.get(lead_id, [])
         )
         if value is not None
     ]
@@ -328,8 +335,8 @@ async def build_lead_intelligence(
     leads = await _load_payloads(settings.database_path, "lead")
     history = await _load_payloads(settings.database_path, "lead_stage_history")
     activities = await _load_lead_activities(settings.database_path)
-    status_labels, status_semantics, source_labels, catalog_loaded = (
-        await _load_status_catalog(settings)
+    status_labels, status_semantics, source_labels, catalog_loaded = await _load_status_catalog(
+        settings
     )
 
     history_by_owner: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -356,11 +363,7 @@ async def build_lead_intelligence(
             "critical": 0,
         }
     )
-    lead_by_id = {
-        _text(lead.get("ID"), ""): lead
-        for lead in leads
-        if _text(lead.get("ID"), "")
-    }
+    lead_by_id = {_text(lead.get("ID"), ""): lead for lead in leads if _text(lead.get("ID"), "")}
 
     for lead in leads:
         status_id = _text(lead.get("STATUS_ID"), "не указан")
@@ -408,8 +411,7 @@ async def build_lead_intelligence(
         )
     ]
     history_schema_ready = all(
-        item.get("STATUS_ID") not in (None, "")
-        and item.get("STATUS_SEMANTIC_ID") not in (None, "")
+        item.get("STATUS_ID") not in (None, "") and item.get("STATUS_SEMANTIC_ID") not in (None, "")
         for item in events_in_window
     )
     leads_with_status_events = {
@@ -431,8 +433,10 @@ async def build_lead_intelligence(
         previous = latest_final_by_owner.get(owner_id)
         previous_at = _datetime(previous.get("CREATED_TIME")) if previous else None
         current_at = _datetime(item.get("CREATED_TIME"))
-        if previous is None or previous_at is None or (
-            current_at is not None and current_at >= previous_at
+        if (
+            previous is None
+            or previous_at is None
+            or (current_at is not None and current_at >= previous_at)
         ):
             latest_final_by_owner[owner_id] = item
 
@@ -454,11 +458,7 @@ async def build_lead_intelligence(
         if status_id:
             final_status_counts[(status_id, semantic)] += 1
         lead = lead_by_id.get(owner_id)
-        manager_id = (
-            _text(lead.get("ASSIGNED_BY_ID"), "не назначен")
-            if lead
-            else "не назначен"
-        )
+        manager_id = _text(lead.get("ASSIGNED_BY_ID"), "не назначен") if lead else "не назначен"
         if semantic == "S":
             manager_counters[manager_id]["success"] += 1
         elif semantic == "F":
@@ -469,6 +469,10 @@ async def build_lead_intelligence(
     crm_activities = 0
     completed_activities = 0
     completed_communications = 0
+    manager_evidence_events = 0
+    human_actions = 0
+    system_activities = 0
+    unknown_activities = 0
     for item in activities:
         completed = _is_completed(item.get("COMPLETED"))
         event_at = _activity_timestamp(item, completed=completed)
@@ -480,7 +484,16 @@ async def build_lead_intelligence(
         activity_type_counts[label] += 1
         if completed:
             completed_activities += 1
-        if completed and type_id in _COMMUNICATION_TYPE_IDS:
+        evidence = classify_activity(normalize_activity(item))
+        if evidence.is_manager_evidence:
+            manager_evidence_events += 1
+        if evidence.classification is ActivityClassification.HUMAN_ACTION:
+            human_actions += 1
+        elif evidence.classification is ActivityClassification.SYSTEM_ACTIVITY:
+            system_activities += 1
+        elif evidence.classification is ActivityClassification.UNKNOWN:
+            unknown_activities += 1
+        if evidence.classification is ActivityClassification.CONFIRMED_COMMUNICATION:
             completed_communications += 1
             communication_type_counts[label] += 1
 
@@ -565,6 +578,10 @@ async def build_lead_intelligence(
         managers=managers,
         catalog_loaded=catalog_loaded,
         history_schema_ready=history_schema_ready,
+        manager_evidence_events=manager_evidence_events,
+        human_actions=human_actions,
+        system_activities=system_activities,
+        unknown_activities=unknown_activities,
     )
 
 
@@ -623,8 +640,7 @@ def format_lead_intelligence(
             [
                 f"• Успешных финализаций: {report.successful_finalizations}",
                 f"• Неуспешных финализаций: {report.failed_finalizations}",
-                "• Доля успешных среди финализированных переходов: "
-                f"{_finalized_share(report)}",
+                f"• Доля успешных среди финализированных переходов: {_finalized_share(report)}",
             ]
         )
     else:
@@ -668,6 +684,10 @@ def format_lead_intelligence(
             f"• всего: {report.crm_activities}",
             f"• завершённых: {report.completed_activities}",
             f"• подтверждённых коммуникаций: {report.completed_communications}",
+            f"• evidence действий со стороны менеджера: {report.manager_evidence_events}",
+            f"• явных User Action: {report.human_actions}",
+            f"• system/autocomplete activities: {report.system_activities}",
+            f"• unknown activities: {report.unknown_activities}",
         ]
     )
     if report.activity_type_counts:
@@ -683,15 +703,11 @@ def format_lead_intelligence(
 
     if report.managers:
         lines.append("\nМенеджеры · текущая операционная картина:")
-        lines.extend(
-            _manager_line(item, directory)
-            for item in report.managers[:manager_limit]
-        )
+        lines.extend(_manager_line(item, directory) for item in report.managers[:manager_limit])
         unresolved = sum(
             1
             for item in report.managers[:manager_limit]
-            if item.assigned_by_id not in directory.users
-            and item.assigned_by_id != "не назначен"
+            if item.assigned_by_id not in directory.users and item.assigned_by_id != "не назначен"
         )
         if unresolved:
             lines.append(
@@ -711,6 +727,13 @@ def format_lead_intelligence(
             "• менеджер финализации определяется по текущему ASSIGNED_BY_ID лида, "
             "поскольку stage history не хранит исторического ответственного;",
             "• aging 3+/5+ — общий сигнал движения, не stage-specific SLA лида;",
+            "• activity evidence: completed meeting/call/e-mail = confirmed "
+            "communication; completed User Action = human action; positive "
+            "AUTOCOMPLETE_RULE на некоммуникационной activity = system; "
+            "неоднозначное остаётся unknown;",
+            "• manager-side evidence = User Action либо исходящий completed "
+            "call/e-mail (DIRECTION=2) без autocomplete-evidence; incoming и meeting "
+            "менеджеру автоматически не засчитываются;",
             "• first-response SLA здесь не рассчитывается;",
             "• тексты писем, телефоны, e-mail и другие контакты клиента в отчёт не входят.",
         ]

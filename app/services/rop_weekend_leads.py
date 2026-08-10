@@ -11,10 +11,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import aiosqlite
 
 from app.config import Settings
+from app.semantic.activity_classifier import (
+    ActivityClassification,
+    classify_activity,
+)
+from app.semantic.normalizer import normalize_activity
 from app.services.rop_directory import RopDirectory, employee_label, load_rop_directory
 from app.storage.crm_store import CrmStore
 
-_COMMUNICATION_TYPE_IDS = frozenset({"1", "2", "4"})
 _TECHNICAL_FUTURE_YEAR = 2099
 
 
@@ -29,6 +33,13 @@ class WeekendManagerStat:
     current_success: int
     current_failed: int
     median_first_communication_seconds: float | None
+    leads_with_manager_evidence: int = 0
+    manager_evidence_events: int = 0
+    leads_with_system_activity: int = 0
+    leads_with_unknown_activity: int = 0
+    completed_human_actions: int = 0
+    system_activities: int = 0
+    unknown_activities: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +56,13 @@ class WeekendLeadReport:
     current_failed: int
     median_first_communication_seconds: float | None
     managers: tuple[WeekendManagerStat, ...]
+    leads_with_manager_evidence: int = 0
+    manager_evidence_events: int = 0
+    leads_with_system_activity: int = 0
+    leads_with_unknown_activity: int = 0
+    completed_human_actions: int = 0
+    system_activities: int = 0
+    unknown_activities: int = 0
 
 
 def _timezone(name: str) -> ZoneInfo:
@@ -197,8 +215,15 @@ async def build_weekend_lead_report(
         lambda: {
             "leads": 0,
             "activity": 0,
+            "manager_evidence_leads": 0,
+            "manager_evidence_events": 0,
             "communication_leads": 0,
             "communications": 0,
+            "system_leads": 0,
+            "unknown_leads": 0,
+            "human_actions": 0,
+            "system_activities": 0,
+            "unknown_activities": 0,
             "active": 0,
             "success": 0,
             "failed": 0,
@@ -207,8 +232,15 @@ async def build_weekend_lead_report(
     )
 
     leads_with_activity = 0
+    leads_with_manager_evidence = 0
+    manager_evidence_events = 0
     leads_with_communication = 0
     completed_communications = 0
+    leads_with_system_activity = 0
+    leads_with_unknown_activity = 0
+    completed_human_actions = 0
+    system_activities = 0
+    unknown_activities = 0
     current_active = 0
     current_success = 0
     current_failed = 0
@@ -242,17 +274,59 @@ async def build_weekend_lead_report(
             leads_with_activity += 1
             manager["activity"] += 1
 
-        communications = [
-            (event_at, item)
-            for item, event_at, completed in valid_activities
-            if completed and _text(item.get("TYPE_ID"), "0") in _COMMUNICATION_TYPE_IDS
+        classified = [
+            (event_at, classify_activity(normalize_activity(item)))
+            for item, event_at, _completed in valid_activities
         ]
+        communications = [
+            (event_at, evidence)
+            for event_at, evidence in classified
+            if evidence.classification is ActivityClassification.CONFIRMED_COMMUNICATION
+        ]
+        human_actions = [
+            evidence
+            for _event_at, evidence in classified
+            if evidence.classification is ActivityClassification.HUMAN_ACTION
+        ]
+        system_items = [
+            evidence
+            for _event_at, evidence in classified
+            if evidence.classification is ActivityClassification.SYSTEM_ACTIVITY
+        ]
+        unknown_items = [
+            evidence
+            for _event_at, evidence in classified
+            if evidence.classification is ActivityClassification.UNKNOWN
+        ]
+        manager_events = [
+            evidence for _event_at, evidence in classified if evidence.is_manager_evidence
+        ]
+
+        if manager_events:
+            leads_with_manager_evidence += 1
+            manager["manager_evidence_leads"] += 1
+            manager_evidence_events += len(manager_events)
+            manager["manager_evidence_events"] += len(manager_events)
+        if system_items:
+            leads_with_system_activity += 1
+            manager["system_leads"] += 1
+            system_activities += len(system_items)
+            manager["system_activities"] += len(system_items)
+        if unknown_items:
+            leads_with_unknown_activity += 1
+            manager["unknown_leads"] += 1
+            unknown_activities += len(unknown_items)
+            manager["unknown_activities"] += len(unknown_items)
+        if human_actions:
+            completed_human_actions += len(human_actions)
+            manager["human_actions"] += len(human_actions)
+
         if communications:
             leads_with_communication += 1
             manager["communication_leads"] += 1
             completed_communications += len(communications)
             manager["communications"] += len(communications)
-            first_at = min(event_at for event_at, _item in communications)
+            first_at = min(event_at for event_at, _evidence in communications)
             delay = max(0.0, (first_at - created_at).total_seconds())
             first_communication_delays.append(delay)
             manager["delays"].append(delay)
@@ -272,6 +346,13 @@ async def build_weekend_lead_report(
                     median_first_communication_seconds=(
                         float(median(values["delays"])) if values["delays"] else None
                     ),
+                    leads_with_manager_evidence=int(values["manager_evidence_leads"]),
+                    manager_evidence_events=int(values["manager_evidence_events"]),
+                    leads_with_system_activity=int(values["system_leads"]),
+                    leads_with_unknown_activity=int(values["unknown_leads"]),
+                    completed_human_actions=int(values["human_actions"]),
+                    system_activities=int(values["system_activities"]),
+                    unknown_activities=int(values["unknown_activities"]),
                 )
                 for manager_id, values in manager_rows.items()
             ),
@@ -295,6 +376,13 @@ async def build_weekend_lead_report(
             float(median(first_communication_delays)) if first_communication_delays else None
         ),
         managers=managers,
+        leads_with_manager_evidence=leads_with_manager_evidence,
+        manager_evidence_events=manager_evidence_events,
+        leads_with_system_activity=leads_with_system_activity,
+        leads_with_unknown_activity=leads_with_unknown_activity,
+        completed_human_actions=completed_human_actions,
+        system_activities=system_activities,
+        unknown_activities=unknown_activities,
     )
 
 
@@ -327,10 +415,15 @@ def _manager_line(item: WeekendManagerStat, directory: RopDirectory) -> str:
         f"• {employee_label(directory, item.assigned_by_id)} | лидов {item.leads} | "
         f"с CRM-активностью {item.leads_with_activity}/{item.leads} "
         f"({_percent(item.leads_with_activity, item.leads)}) | "
+        f"с evidence действия со стороны менеджера "
+        f"{item.leads_with_manager_evidence}/{item.leads} "
+        f"({_percent(item.leads_with_manager_evidence, item.leads)}) | "
         f"с подтверждённой коммуникацией {item.leads_with_communication}/{item.leads} "
         f"({_percent(item.leads_with_communication, item.leads)}) | "
         f"без подтверждённой коммуникации {no_communication} | "
         f"коммуникаций {item.completed_communications} | "
+        f"user actions {item.completed_human_actions} | "
+        f"system-auto {item.system_activities} | unknown {item.unknown_activities} | "
         f"медиана до первой подтверждённой коммуникации "
         f"{_format_duration(item.median_first_communication_seconds)} | "
         f"сейчас P/S/F {item.current_active}/{item.current_success}/{item.current_failed}"
@@ -355,11 +448,17 @@ def format_weekend_lead_report(
         f"• Пришло лидов: {report.total_leads}",
         f"• С любой CRM-активностью после создания: {report.leads_with_activity} "
         f"({_percent(report.leads_with_activity, report.total_leads)})",
+        f"• С evidence действия со стороны менеджера: "
+        f"{report.leads_with_manager_evidence} "
+        f"({_percent(report.leads_with_manager_evidence, report.total_leads)})",
         f"• С подтверждённой коммуникацией после создания: "
         f"{report.leads_with_communication} "
         f"({_percent(report.leads_with_communication, report.total_leads)})",
         f"• Без подтверждённой коммуникации: {no_communication}",
         f"• Завершённых подтверждённых коммуникаций: {report.completed_communications}",
+        f"• Явных завершённых User Action: {report.completed_human_actions}",
+        f"• Лидов с автозавершённой системной активностью: {report.leads_with_system_activity}",
+        f"• Лидов с неклассифицированной активностью: {report.leads_with_unknown_activity}",
         "• Медиана до первой подтверждённой CRM-коммуникации: "
         f"{_format_duration(report.median_first_communication_seconds)} "
         f"(n={report.leads_with_communication})",
@@ -369,9 +468,7 @@ def format_weekend_lead_report(
 
     if report.managers:
         lines.append("\nМенеджеры · обработка лидов этой weekend-когорты:")
-        lines.extend(
-            _manager_line(item, directory) for item in report.managers[:manager_limit]
-        )
+        lines.extend(_manager_line(item, directory) for item in report.managers[:manager_limit])
 
     lines.extend(
         [
@@ -380,8 +477,12 @@ def format_weekend_lead_report(
             "если запрос сделан в сами выходные, окно заканчивается текущим моментом;",
             "• менеджер = текущий ASSIGNED_BY_ID; это не доказывает, кто был ответственным "
             "в момент поступления лида, если ответственный позже менялся;",
-            "• подтверждённая коммуникация = завершённая CRM activity типа встреча, звонок "
-            "или e-mail; пользовательские действия и неизвестные типы сюда не входят;",
+            "• confirmed_communication = завершённая activity типа встреча, звонок или e-mail;",
+            "• evidence действия со стороны менеджера = завершённый User Action либо "
+            "исходящий завершённый звонок/e-mail (DIRECTION=2) без autocomplete-evidence; "
+            "входящая коммуникация и meeting менеджеру автоматически не засчитываются;",
+            "• system_activity = завершённая некоммуникационная activity с положительным "
+            "AUTOCOMPLETE_RULE; неоднозначные task/action остаются unknown;",
             "• медиана до первой подтверждённой коммуникации — наблюдаемый CRM-факт, "
             "а не first-response SLA и не гарантия времени первого ответа клиенту;",
             "• отчёт не передаёт в LLM названия лидов, телефоны, e-mail клиента или сырые "

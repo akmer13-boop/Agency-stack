@@ -80,3 +80,21 @@ Runtime path:
 The business formula and current inclusive period boundaries are unchanged.
 Deal metrics remain on the previous implementation until migrated separately.
 \n
+
+## Stage 4.2 — CRM activity evidence classification
+
+Activity rows are not treated as equivalent proof of manager work.
+
+Deterministic classes:
+
+- `confirmed_communication`: completed meeting/call/e-mail;
+- `human_action`: completed `TYPE_ID=6` User Action unless stronger system evidence applies;
+- `system_activity`: completed non-communication activity with positive `AUTOCOMPLETE_RULE`;
+- `unknown`: insufficient evidence; no business meaning is guessed.
+
+Manager-side evidence is derived conservatively from completed User Action or
+outgoing completed call/e-mail (`DIRECTION=2`) without autocomplete evidence.
+Incoming call/e-mail and meetings remain communication evidence but are not
+automatically credited as manager actions. Missing direction is not guessed.
+
+This taxonomy is not the customer-approved First Response SLA definition.
