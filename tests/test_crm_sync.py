@@ -51,11 +51,15 @@ async def test_crm_store_upserts_entities_idempotently(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_sync_client_reads_stage_history_container() -> None:
+async def test_sync_client_reads_deal_stage_history_fields() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/crm.stagehistory.list.json")
         payload = json.loads(request.content)
         assert payload["start"] == -1
+        assert payload["entityTypeId"] == 2
+        assert "STAGE_ID" in payload["select"]
+        assert "STAGE_SEMANTIC_ID" in payload["select"]
+        assert "STATUS_ID" not in payload["select"]
         return httpx.Response(
             200,
             json={
@@ -65,6 +69,7 @@ async def test_sync_client_reads_stage_history_container() -> None:
                             "ID": "11",
                             "OWNER_ID": "77",
                             "STAGE_ID": "NEW",
+                            "STAGE_SEMANTIC_ID": "P",
                             "CREATED_TIME": "2026-08-07T10:00:00+03:00",
                         }
                     ]
@@ -79,6 +84,42 @@ async def test_sync_client_reads_stage_history_container() -> None:
     )
     items = await client.list_sync_stage_history(entity_type_id=2, max_items=100)
     assert items[0]["ID"] == "11"
+
+
+@pytest.mark.asyncio
+async def test_sync_client_reads_lead_status_history_fields() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/crm.stagehistory.list.json")
+        payload = json.loads(request.content)
+        assert payload["start"] == -1
+        assert payload["entityTypeId"] == 1
+        assert "STATUS_ID" in payload["select"]
+        assert "STATUS_SEMANTIC_ID" in payload["select"]
+        assert "STAGE_ID" not in payload["select"]
+        return httpx.Response(
+            200,
+            json={
+                "result": {
+                    "items": [
+                        {
+                            "ID": "12",
+                            "OWNER_ID": "78",
+                            "STATUS_ID": "CONVERTED",
+                            "STATUS_SEMANTIC_ID": "S",
+                            "CREATED_TIME": "2026-08-07T11:00:00+03:00",
+                        }
+                    ]
+                }
+            },
+        )
+
+    client = SyncBitrix24Client(
+        WEBHOOK_URL,
+        transport=httpx.MockTransport(handler),
+        page_delay_seconds=0,
+    )
+    items = await client.list_sync_stage_history(entity_type_id=1, max_items=100)
+    assert items[0]["STATUS_SEMANTIC_ID"] == "S"
 
 
 @pytest.mark.asyncio
@@ -216,11 +257,40 @@ class FakeClient:
         created_since: str | None = None,
     ):
         self.seen_since.append(created_since)
+        if entity_type_id == 1:
+            yield [
+                {
+                    "ID": "101",
+                    "OWNER_ID": "2",
+                    "CREATED_TIME": "2026-08-07T10:00:00+03:00",
+                    "STATUS_ID": "NEW",
+                    "STATUS_SEMANTIC_ID": "P",
+                }
+            ]
+            return
         yield [
             {
-                "ID": str(100 + entity_type_id),
+                "ID": "102",
                 "OWNER_ID": "1",
                 "CREATED_TIME": "2026-08-07T10:00:00+03:00",
+                "CATEGORY_ID": "0",
+                "STAGE_ID": "NEW",
+                "STAGE_SEMANTIC_ID": "P",
+            }
+        ]
+
+    async def list_departments(self):
+        return [{"ID": "10", "NAME": "Продажи"}]
+
+    async def list_users(self, *, max_items: int = 1000):
+        assert max_items == 1000
+        return [
+            {
+                "ID": "7",
+                "NAME": "Тест",
+                "LAST_NAME": "Менеджер",
+                "ACTIVE": True,
+                "UF_DEPARTMENT": [10],
             }
         ]
 
@@ -251,6 +321,8 @@ async def test_initial_sync_persists_all_core_entity_types(
         "activity": 1,
         "deal_stage_history": 1,
         "lead_stage_history": 1,
+        "department": 1,
+        "user": 1,
     }
     assert fake_client.seen_since == [None] * 7
 
@@ -284,7 +356,56 @@ async def test_incremental_sync_uses_last_completed_run_with_overlap(
     incremental_result = await run_incremental_bitrix_sync(settings)
     assert incremental_result.mode == "incremental"
     assert incremental_result.checkpoint is not None
+    assert incremental_result.lead_history_repaired is False
     assert all(value == incremental_result.checkpoint for value in fake_client.seen_since)
+
+
+@pytest.mark.asyncio
+async def test_incremental_sync_repairs_legacy_lead_history_once(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake_client = FakeClient()
+    monkeypatch.setattr(
+        "app.services.bitrix24_sync.build_sync_client",
+        lambda _settings: fake_client,
+    )
+    database_path = str(tmp_path / "repair.db")
+    settings = Settings(
+        _env_file=None,
+        bitrix24_webhook_url=WEBHOOK_URL,
+        database_path=database_path,
+        bitrix24_sync_overlap_minutes=5,
+    )
+
+    await run_initial_bitrix_sync(settings)
+    store = CrmStore(database_path)
+    await store.upsert_entities(
+        "lead_stage_history",
+        [
+            {
+                "ID": "101",
+                "OWNER_ID": "2",
+                "CREATED_TIME": "2026-08-07T10:00:00+03:00",
+                "STAGE_ID": "NEW",
+                "STAGE_SEMANTIC_ID": "P",
+            }
+        ],
+        modified_field="CREATED_TIME",
+    )
+    fake_client.seen_since.clear()
+
+    repaired = await run_incremental_bitrix_sync(settings)
+    assert repaired.lead_history_repaired is True
+    assert repaired.checkpoint is not None
+    assert fake_client.seen_since[:-1] == [repaired.checkpoint] * 6
+    assert fake_client.seen_since[-1] is None
+
+    fake_client.seen_since.clear()
+    normal = await run_incremental_bitrix_sync(settings)
+    assert normal.lead_history_repaired is False
+    assert normal.checkpoint is not None
+    assert all(value == normal.checkpoint for value in fake_client.seen_since)
 
 
 @pytest.mark.asyncio
