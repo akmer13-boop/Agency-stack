@@ -203,8 +203,8 @@ async def test_lead_intelligence_builds_grounded_rolling_window(tmp_path: Path) 
     assert report.completed_communications == 2
     assert ("E-mail", 1) in report.communication_type_counts
     assert ("Звонок", 1) in report.communication_type_counts
-    assert ("Другой тип (ID 6)", 1) in report.activity_type_counts
-    assert ("Другой тип (ID 6)", 1) not in report.communication_type_counts
+    assert ("Пользовательское действие", 1) in report.activity_type_counts
+    assert ("Пользовательское действие", 1) not in report.communication_type_counts
 
     directory = await load_rop_directory(database_path)
     text = format_lead_intelligence(report, directory)
