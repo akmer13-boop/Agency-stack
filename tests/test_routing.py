@@ -8,6 +8,10 @@ from app.services.routing import route_message
     ("message", "expected"),
     [
         ("Бот не работает после запуска", AgentRoute.TECHNICAL),
+        (
+            "Сколько лидов пришло за выходные и как их менеджеры отработали?",
+            AgentRoute.DEAL_ANALYST,
+        ),
         ("Как оформить договор?", AgentRoute.KNOWLEDGE),
         ("Какие сделки зависли без движения?", AgentRoute.DEAL_ANALYST),
         ("Покажи прогноз выручки и план продаж", AgentRoute.SALES_MANAGER),
