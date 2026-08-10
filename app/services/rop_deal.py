@@ -13,6 +13,7 @@ import aiosqlite
 
 from app.config import Settings
 from app.integrations.bitrix24.client import Bitrix24ReadOnlyClient, Bitrix24RequestError
+from app.integrations.bitrix24.urls import build_deal_url
 from app.proxy import build_proxy_url
 from app.services.rop_catalog import category_label, stage_label
 from app.services.rop_directory import RopDirectory, employee_label, load_rop_directory
@@ -76,6 +77,7 @@ class DealDrilldown:
     next_open_activity: DealActivity | None
     stage_history: tuple[DealStageEvent, ...]
     directory: RopDirectory
+    bitrix_url: str | None = None
     timeline_comments: tuple[DealTimelineComment, ...] = ()
     timeline_error: str | None = None
 
@@ -420,6 +422,12 @@ async def build_deal_drilldown(
         except Bitrix24RequestError as exc:
             timeline_error = exc.error_code or "BITRIX24_REQUEST_ERROR"
 
+    bitrix_url = (
+        build_deal_url(settings.bitrix24_webhook_url, normalized_id)
+        if settings.bitrix24_configured
+        else None
+    )
+
     return DealDrilldown(
         deal_id=normalized_id,
         title=_clean_text(deal.get("TITLE"), limit=180),
@@ -439,6 +447,7 @@ async def build_deal_drilldown(
         next_open_activity=next_open,
         stage_history=_stage_events(history_payload),
         directory=directory,
+        bitrix_url=bitrix_url,
         timeline_comments=comments,
         timeline_error=timeline_error,
     )
@@ -559,6 +568,7 @@ def format_deal_drilldown(
         f"• Сумма: {_money(report.opportunity)} {report.currency}",
         f"• Ответственный: {_employee(report.directory, report.assigned_by_id)}",
         f"• Создана: {_format_dt(report.created_at, timezone_name)}",
+        f"• Bitrix24: {report.bitrix_url or 'ссылка недоступна'}",
         f"• На текущей стадии: {stage_age} дн.",
         f"• SLA: {_sla_text(report)}",
         f"• Связанных CRM-активностей в локальном срезе: {report.activities_count}",
@@ -641,6 +651,7 @@ def format_deal_for_ai(
         f"Воронка/стадия: {category_stage}",
         f"Сумма: {_money(report.opportunity)} {report.currency}",
         f"Ответственный: {_employee(report.directory, report.assigned_by_id)}",
+        f"Ссылка Bitrix24: {report.bitrix_url or 'недоступна'}",
         f"На текущей стадии: {stage_age} дн.",
         f"SLA: {_sla_text(report)}",
         f"CRM-активностей: {report.activities_count}",
