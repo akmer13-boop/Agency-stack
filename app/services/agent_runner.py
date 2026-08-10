@@ -15,6 +15,7 @@ from app.agents.specialists import get_agent_for_route
 from app.config import Settings
 from app.domain import AgentRoute, UserRole
 from app.services.rop_tools import build_rop_function_tools
+from app.services.rop_weekend_leads import build_and_format_weekend_leads
 from app.storage.conversation_store import ConversationMessage
 
 logger = logging.getLogger(__name__)
@@ -41,10 +42,17 @@ _ROP_TOOL_INSTRUCTIONS = (
     "финализациях или менеджерах по лидам обязательно используй get_rop_leads. "
     "Не подменяй lead-focused вопрос общим get_rop_period, потому что он смешивает "
     "лиды и показатели сделок. 'По лидам за последнюю неделю' трактуй как rolling 7 дней. "
+    "Для вопросов 'сколько лидов пришло за выходные', 'как менеджеры отработали лиды за "
+    "выходные' и эквивалентных формулировок обязательно используй get_rop_weekend_leads. "
+    "Не спрашивай даты или часовой пояс для обычной формулировки 'за выходные': tool сам "
+    "использует календарные субботу+воскресенье в ROP_TIMEZONE и возвращает точное окно. "
+    "Не расширяй такой вопрос до сделок, задач или других сущностей без просьбы пользователя. "
     "get_rop_leads считает успешные/неуспешные финализации по lead stage history. "
     "Не называй успешную финализацию лида созданной сделкой и не считай lead→deal "
     "conversion как new_deals/new_leads: это не одна когорта. "
     "First-response SLA по лидам не выводи, пока отдельный инструмент его не измеряет. "
+    "Медиану до первой подтверждённой CRM-коммуникации из get_rop_weekend_leads называй "
+    "наблюдаемым CRM-фактом, а не first-response SLA и не гарантированным первым ответом. "
     "Для вопроса 'что делать сегодня' или 'куда вмешаться' сначала используй get_rop_focus. "
     "Для SLA используй get_rop_sla, а для скорости прохождения — get_rop_cycle_time. "
     "Для вопроса о конкретной сделке по ID обязательно используй get_rop_deal. "
@@ -94,7 +102,10 @@ _ROP_TOOL_INSTRUCTIONS = (
     "называй это ручной проверкой, а не фактом из CRM. "
     "Не обещай получить контакты клиента, комментарии, переписки, задачи, звонки, файлы "
     "или другие данные, если отдельного инструмента для них нет. "
-    "Не предлагай вызвать инструмент, которого нет в доступном списке tools. "
+    "Не предлагай вызвать инструмент, которого нет в доступном списке tools. Никогда не "
+    "придумывай имена tools вроде get_rop_lead_activities или get_rop_lead_stage_history. "
+    "Если существующий tool может ответить сейчас, не пиши 'после подтверждения запущу "
+    "выгрузку' и не проси лишнее подтверждение. "
     "Конверсию используй только ту, которую вернул инструмент, либо явно называй "
     "свою величину не когортной конверсией. "
     "OPPORTUNITY успешных сделок называй суммой WON/успешных сделок, а не фактической "
@@ -144,6 +155,18 @@ def build_agent_input(
     )
 
 
+def _is_weekend_lead_query(message: str) -> bool:
+    normalized = " ".join(message.lower().split())
+    weekend = "выходн" in normalized or (
+        "суббот" in normalized and "воскрес" in normalized
+    )
+    intent = any(
+        token in normalized
+        for token in ("сколько", "приш", "поступ", "отработ", "обработ", "менедж")
+    )
+    return "лид" in normalized and weekend and intent
+
+
 def _prepare_agent(route: AgentRoute, role: UserRole, settings: Settings):
     agent = get_agent_for_route(route)
     if role not in _ANALYTICS_ROLES or route not in _ANALYTICS_ROUTES:
@@ -164,6 +187,17 @@ async def execute_agent(
     role: UserRole = UserRole.EMPLOYEE,
     history: Sequence[ConversationMessage] = (),
 ) -> AgentRunResult:
+    if (
+        role in _ANALYTICS_ROLES
+        and route in _ANALYTICS_ROUTES
+        and _is_weekend_lead_query(message)
+    ):
+        return AgentRunResult(
+            answer=await build_and_format_weekend_leads(settings),
+            agent="ИИ-РОП · Weekend Leads",
+            route=route,
+        )
+
     if not settings.openai_api_key:
         raise AgentExecutionError(
             "OPENAI_API_KEY is not configured",
