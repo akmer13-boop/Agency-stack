@@ -1,6 +1,6 @@
 from app.config import Settings
 from app.domain import AgentRoute, UserRole
-from app.services.agent_runner import _prepare_agent
+from app.services.agent_runner import _is_weekend_lead_query, _prepare_agent
 from app.services.rop_catalog import category_label, stage_label
 from app.services.rop_tools import build_rop_function_tools
 
@@ -30,6 +30,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_deal",
         "get_rop_deal_activity",
         "get_rop_leads",
+        "get_rop_weekend_leads",
     }
 
 
@@ -50,6 +51,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_deal" in names
     assert "get_rop_deal_activity" in names
     assert "get_rop_leads" in names
+    assert "get_rop_weekend_leads" in names
 
 
 def test_manager_agent_has_grounded_deadline_guardrails() -> None:
@@ -100,6 +102,22 @@ def test_manager_agent_routes_lead_questions_to_lead_intelligence() -> None:
     assert "Не подменяй lead-focused вопрос общим get_rop_period" in agent.instructions
     assert "First-response SLA по лидам не выводи" in agent.instructions
     assert "ID→ФИО" in agent.instructions
+
+
+def test_manager_agent_routes_weekend_customer_question_without_clarification() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "обязательно используй get_rop_weekend_leads" in agent.instructions
+    assert "Не спрашивай даты или часовой пояс" in agent.instructions
+    assert "get_rop_lead_activities" in agent.instructions
+    assert "не пиши 'после подтверждения запущу" in agent.instructions
+
+    assert _is_weekend_lead_query(
+        "Сколько лидов пришло за выходные и как их менеджеры отработали?"
+    )
+    assert _is_weekend_lead_query("Как обработали лиды за субботу и воскресенье?")
+    assert not _is_weekend_lead_query("Как распределить менеджеров на выходные?")
 
 
 def test_employee_agent_does_not_receive_rop_tools() -> None:
