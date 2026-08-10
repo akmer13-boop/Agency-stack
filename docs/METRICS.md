@@ -125,3 +125,13 @@ The following are intentionally not inferred:
 
 Until those decisions are approved, outputs must be labelled observed response
 evidence rather than First Response SLA.
+
+## Stage 4.4A — First Response policy readiness
+
+This stage introduces a fail-closed policy configuration contract.
+
+Default state is `DISABLED`. If enabled with missing or unsupported values the
+state is `BLOCKED`. Only a complete supported configuration becomes `READY`.
+
+No values are inferred from Stage 4.3 observed baselines. `READY` is not an SLA
+compliance result and no pass/fail/overdue calculation is performed.
