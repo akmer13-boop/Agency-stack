@@ -111,29 +111,29 @@ async def test_lead_intelligence_builds_grounded_rolling_window(tmp_path: Path) 
                 "ID": "101",
                 "OWNER_ID": "1",
                 "CREATED_TIME": (now - timedelta(days=2)).isoformat(),
-                "STAGE_ID": "NEW",
-                "STAGE_SEMANTIC_ID": "P",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
             },
             {
                 "ID": "102",
                 "OWNER_ID": "2",
                 "CREATED_TIME": (now - timedelta(days=4)).isoformat(),
-                "STAGE_ID": "IN_PROCESS",
-                "STAGE_SEMANTIC_ID": "P",
+                "STATUS_ID": "IN_PROCESS",
+                "STATUS_SEMANTIC_ID": "P",
             },
             {
                 "ID": "103",
                 "OWNER_ID": "3",
                 "CREATED_TIME": (now - timedelta(days=1)).isoformat(),
-                "STAGE_ID": "CONVERTED",
-                "STAGE_SEMANTIC_ID": "S",
+                "STATUS_ID": "CONVERTED",
+                "STATUS_SEMANTIC_ID": "S",
             },
             {
                 "ID": "104",
                 "OWNER_ID": "4",
                 "CREATED_TIME": (now - timedelta(days=1)).isoformat(),
-                "STAGE_ID": "JUNK",
-                "STAGE_SEMANTIC_ID": "F",
+                "STATUS_ID": "JUNK",
+                "STATUS_SEMANTIC_ID": "F",
             },
         ],
         modified_field="CREATED_TIME",
@@ -189,6 +189,13 @@ async def test_lead_intelligence_builds_grounded_rolling_window(tmp_path: Path) 
     assert report.status_events == 4
     assert report.successful_finalizations == 1
     assert report.failed_finalizations == 1
+    assert report.history_schema_ready is True
+    assert ("CONVERTED", "S", 1) in {
+        (item.status_id, item.semantic, item.count) for item in report.final_statuses
+    }
+    assert ("JUNK", "F", 1) in {
+        (item.status_id, item.semantic, item.count) for item in report.final_statuses
+    }
     assert report.active_attention_3d == 2
     assert report.active_critical_5d == 1
     assert report.crm_activities == 4
@@ -204,9 +211,55 @@ async def test_lead_intelligence_builds_grounded_rolling_window(tmp_path: Path) 
     assert "Иван Петров · Продажи B2C (ID 10)" in text
     assert "Анна Смирнова · Продажи B2B (ID 11)" in text
     assert "Доля успешных среди финализированных переходов: 50.0% (n=2)" in text
+    assert "Финализации по статусам за окно:" in text
     assert "не lead→deal cohort conversion" in text
 
     ai_text = format_lead_intelligence_for_ai(report, directory)
     assert "SECRET LEAD" not in ai_text
     assert "lead→deal conversion" in ai_text
     assert "Не называй менеджера худшим без явной метрики" in ai_text
+    assert "не обещай выгрузить список" in ai_text
+
+
+@pytest.mark.asyncio
+async def test_lead_intelligence_marks_legacy_history_unreliable(tmp_path: Path) -> None:
+    now = datetime(2026, 8, 9, 20, 0, tzinfo=UTC)
+    database_path = str(tmp_path / "legacy.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+    await store.upsert_entities(
+        "lead",
+        [
+            {
+                "ID": "1",
+                "STATUS_ID": "CONVERTED",
+                "STATUS_SEMANTIC_ID": "S",
+                "ASSIGNED_BY_ID": "10",
+                "DATE_CREATE": (now - timedelta(days=2)).isoformat(),
+                "DATE_MODIFY": (now - timedelta(days=1)).isoformat(),
+            }
+        ],
+        modified_field="DATE_MODIFY",
+    )
+    await store.upsert_entities(
+        "lead_stage_history",
+        [
+            {
+                "ID": "101",
+                "OWNER_ID": "1",
+                "CREATED_TIME": (now - timedelta(days=1)).isoformat(),
+                "STAGE_ID": "CONVERTED",
+                "STAGE_SEMANTIC_ID": "S",
+            }
+        ],
+        modified_field="CREATED_TIME",
+    )
+
+    settings = Settings(_env_file=None, database_path=database_path)
+    report = await build_lead_intelligence(settings, 7, now=now)
+    assert report.history_schema_ready is False
+
+    directory = await load_rop_directory(database_path)
+    text = format_lead_intelligence(report, directory)
+    assert "временно не считаются достоверными" in text
+    assert "/bitrix_sync_incremental" in text
