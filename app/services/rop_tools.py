@@ -50,6 +50,7 @@ from app.services.rop_recent_activity import (
     build_recent_deal_activity,
     format_recent_deal_activity_for_ai,
 )
+from app.services.rop_weekend_leads import build_and_format_weekend_leads
 
 
 async def _build_snapshot(settings: Settings) -> RopSnapshot:
@@ -259,6 +260,18 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             timezone_name=settings.rop_timezone,
         )
 
+    @function_tool
+    async def get_rop_weekend_leads() -> str:
+        """Return exact lead cohort and manager processing facts for the weekend.
+
+        Use this tool for questions such as "how many leads came over the weekend" and
+        "how did managers process weekend leads". The cohort window is calendar Saturday
+        and Sunday in ROP_TIMEZONE. Processing is observed from each lead creation through
+        the current report time. The tool returns only aggregated evidence and never calls
+        the observed first confirmed CRM communication a first-response SLA.
+        """
+        return await build_and_format_weekend_leads(settings)
+
     return [
         get_rop_period,
         get_rop_pipeline,
@@ -273,4 +286,5 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_deal,
         get_rop_deal_activity,
         get_rop_leads,
+        get_rop_weekend_leads,
     ]
