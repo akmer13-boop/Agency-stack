@@ -48,6 +48,8 @@ class SemanticActivity:
     updated_at: datetime | None
     deadline_at: datetime | None
     completed: bool
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
     provider_id: str | None = None
     provider_type_id: str | None = None
     direction: str | None = None

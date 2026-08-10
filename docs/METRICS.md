@@ -98,3 +98,30 @@ Incoming call/e-mail and meetings remain communication evidence but are not
 automatically credited as manager actions. Missing direction is not guessed.
 
 This taxonomy is not the customer-approved First Response SLA definition.
+
+## Stage 4.3 — Lead response evidence
+
+This is an evidence contract, not an approved SLA metric.
+
+For a rolling lead cohort the deterministic layer records:
+
+- `DATE_CREATE` as the technical observation start;
+- first manager-side evidence after creation;
+- first confirmed CRM communication after creation;
+- calendar elapsed seconds;
+- evidence activity ID;
+- timestamp source and fallback warnings.
+
+Aggregates include median and p90 elapsed time plus evidence coverage.
+
+The following are intentionally not inferred:
+
+- business-hours calendar;
+- holidays/weekends;
+- historical reassignment;
+- normative first-response event;
+- SLA threshold;
+- compliance/pass/fail.
+
+Until those decisions are approved, outputs must be labelled observed response
+evidence rather than First Response SLA.
