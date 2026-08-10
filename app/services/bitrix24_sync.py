@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import aiosqlite
+
 from app.config import Settings
 from app.integrations.bitrix24 import (
     Bitrix24ConfigurationError,
@@ -25,6 +27,7 @@ class BitrixSyncResult:
     counts: dict[str, int]
     mode: str = "full"
     checkpoint: str | None = None
+    lead_history_repaired: bool = False
 
 
 def build_sync_client(settings: Settings) -> SyncBitrix24Client:
@@ -61,6 +64,39 @@ async def _sync_pages(
         await store.update_run_progress(run_id, counts)
 
 
+async def _sync_directory(
+    store: CrmStore,
+    run_id: int,
+    counts: dict[str, int],
+    client: SyncBitrix24Client,
+) -> None:
+    departments = await client.list_departments()
+    counts["department"] = await store.upsert_entities("department", departments)
+    await store.update_run_progress(run_id, counts)
+
+    users = await client.list_users(max_items=1000)
+    counts["user"] = await store.upsert_entities("user", users)
+    await store.update_run_progress(run_id, counts)
+
+
+async def _lead_history_needs_repair(database_path: str) -> bool:
+    async with aiosqlite.connect(database_path) as database:
+        cursor = await database.execute(
+            """
+            SELECT 1
+            FROM crm_raw_entities
+            WHERE entity_type = 'lead_stage_history'
+              AND (
+                  json_extract(payload_json, '$.STATUS_ID') IS NULL
+                  OR json_extract(payload_json, '$.STATUS_SEMANTIC_ID') IS NULL
+              )
+            LIMIT 1
+            """
+        )
+        row = await cursor.fetchone()
+    return row is not None
+
+
 def _checkpoint_with_overlap(started_at: str, overlap_minutes: int) -> str:
     try:
         checkpoint = datetime.fromisoformat(started_at)
@@ -87,6 +123,10 @@ async def _run_bitrix_sync(
     client = build_sync_client(settings)
     limit = settings.bitrix24_sync_item_limit
     counts: dict[str, int] = {}
+    lead_history_repaired = (
+        mode == "incremental" and await _lead_history_needs_repair(settings.database_path)
+    )
+    lead_history_since = None if lead_history_repaired else modified_since
 
     try:
         await _sync_pages(
@@ -149,10 +189,11 @@ async def _run_bitrix_sync(
             client.iter_sync_stage_history(
                 entity_type_id=1,
                 max_items=limit,
-                created_since=modified_since,
+                created_since=lead_history_since,
             ),
             "CREATED_TIME",
         )
+        await _sync_directory(store, run_id, counts, client)
     except Bitrix24RequestError as exc:
         await store.fail_run(run_id, exc.error_code or "BITRIX24_REQUEST_ERROR")
         raise
@@ -166,6 +207,7 @@ async def _run_bitrix_sync(
         counts=counts,
         mode=mode,
         checkpoint=modified_since,
+        lead_history_repaired=lead_history_repaired,
     )
 
 
@@ -211,6 +253,8 @@ def _labels() -> dict[str, str]:
         "activity": "Активности",
         "deal_stage_history": "История стадий сделок",
         "lead_stage_history": "История стадий лидов",
+        "department": "Подразделения",
+        "user": "Сотрудники",
     }
 
 
@@ -222,9 +266,15 @@ def format_sync_result(result: BitrixSyncResult) -> str:
             lines.append(f"Окно изменений с: {result.checkpoint}")
         for entity_type, count in result.counts.items():
             lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
+        if result.lead_history_repaired:
+            lines.append(
+                "• Lead history repair: старые записи истории лидов без STATUS_* "
+                "автоматически перечитаны полностью в read-only режиме."
+            )
         lines.append(
             "Показано количество записей, полученных в окне изменений. "
-            "Данные сохранены через upsert; запись в Bitrix24 не выполнялась."
+            "Для одноразового lead history repair история лидов может быть перечитана "
+            "полностью. Данные сохранены через upsert; запись в Bitrix24 не выполнялась."
         )
         return "\n".join(lines)
 
@@ -233,6 +283,7 @@ def format_sync_result(result: BitrixSyncResult) -> str:
         lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
     lines.append(
         "Пагинация пройдена до реального конца данных по ID-cursor. "
+        "Справочник сотрудников/подразделений обновлён в том же read-only запуске. "
         "Запись в Bitrix24 не выполнялась."
     )
     return "\n".join(lines)
