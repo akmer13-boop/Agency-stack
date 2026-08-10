@@ -343,19 +343,31 @@ class SyncBitrix24Client(Bitrix24ReadOnlyClient):
         max_items: int | None = None,
         created_since: str | None = None,
     ) -> AsyncIterator[list[dict[str, Any]]]:
+        if entity_type_id == 1:
+            select = [
+                "ID",
+                "TYPE_ID",
+                "OWNER_ID",
+                "CREATED_TIME",
+                "STATUS_SEMANTIC_ID",
+                "STATUS_ID",
+            ]
+        else:
+            select = [
+                "ID",
+                "TYPE_ID",
+                "OWNER_ID",
+                "CREATED_TIME",
+                "CATEGORY_ID",
+                "STAGE_SEMANTIC_ID",
+                "STAGE_ID",
+            ]
+
         async for page in self._iter_id_cursor_pages(
             "crm.stagehistory.list",
             {
                 "entityTypeId": entity_type_id,
-                "select": [
-                    "ID",
-                    "TYPE_ID",
-                    "OWNER_ID",
-                    "CREATED_TIME",
-                    "CATEGORY_ID",
-                    "STAGE_SEMANTIC_ID",
-                    "STAGE_ID",
-                ],
+                "select": select,
                 "order": {"ID": "ASC"},
                 "filter": self._modified_filter("CREATED_TIME", created_since),
             },
