@@ -24,6 +24,7 @@ _ACTIVITY_TYPE_LABELS = {
     "3": "Задача",
     "4": "E-mail",
     "5": "Действие",
+    "6": "Пользовательское действие",
 }
 _TECHNICAL_FUTURE_YEAR = 2099
 
