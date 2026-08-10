@@ -13,9 +13,7 @@ def _parse_id_list(raw_values: str, *, variable_name: str) -> frozenset[int]:
         try:
             values.add(int(value))
         except ValueError as exc:
-            raise ValueError(
-                f"{variable_name} must contain comma-separated integers"
-            ) from exc
+            raise ValueError(f"{variable_name} must contain comma-separated integers") from exc
     return frozenset(values)
 
 
@@ -33,7 +31,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.18"
+    app_version: str = "0.4.19"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -81,6 +79,12 @@ class Settings(BaseSettings):
     rop_timezone: str = "Europe/Moscow"
     rop_included_category_ids: str = ""
     rop_excluded_stage_ids: str = ""
+    rop_first_response_policy_enabled: bool = False
+    rop_first_response_timer_start: str = ""
+    rop_first_response_event: str = ""
+    rop_first_response_clock: str = ""
+    rop_first_response_reassignment_mode: str = ""
+    rop_first_response_threshold_seconds: int = Field(default=0, ge=0, le=604_800)
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
@@ -108,11 +112,7 @@ class Settings(BaseSettings):
 
     @property
     def proxy_configured(self) -> bool:
-        return bool(
-            self.proxy_type.strip()
-            and self.proxy_host.strip()
-            and self.proxy_port > 0
-        )
+        return bool(self.proxy_type.strip() and self.proxy_host.strip() and self.proxy_port > 0)
 
     @property
     def proxy_uses_credentials(self) -> bool:

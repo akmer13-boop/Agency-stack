@@ -37,6 +37,10 @@ from app.services.rop_deep_analytics import (
     format_stage_aging_report,
 )
 from app.services.rop_directory import enrich_responsible_ids, load_rop_directory
+from app.services.rop_first_response_policy import (
+    build_first_response_policy,
+    format_first_response_policy_for_ai,
+)
 from app.services.rop_leads import build_lead_intelligence, format_lead_intelligence_for_ai
 from app.services.rop_mvp3 import (
     build_cycle_time_report,
@@ -282,6 +286,17 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_lead_response_evidence_for_ai(report)
 
     @function_tool
+    async def get_rop_first_response_policy() -> str:
+        """Return First Response business-rule configuration readiness.
+
+        Use this tool when the user asks whether First Response SLA policy is
+        configured, what rule is approved in runtime, or which policy fields
+        are still blocking activation. This tool does not calculate compliance.
+        """
+        policy = build_first_response_policy(settings)
+        return format_first_response_policy_for_ai(policy)
+
+    @function_tool
     async def get_rop_weekend_leads() -> str:
         """Return exact lead cohort and manager processing facts for the weekend.
 
@@ -308,5 +323,6 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_deal_activity,
         get_rop_leads,
         get_rop_lead_response_evidence,
+        get_rop_first_response_policy,
         get_rop_weekend_leads,
     ]
