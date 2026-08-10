@@ -32,6 +32,9 @@ class JsonFormatter(logging.Formatter):
             "status_code",
             "duration_ms",
             "agent",
+            "attempt",
+            "retry_in_seconds",
+            "error_code",
         ):
             value = getattr(record, key, None)
             if value is not None:
@@ -52,6 +55,11 @@ def configure_logging(level: str = "INFO") -> None:
 
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
+
+    # HTTPX INFO messages include the full request URL. For Bitrix incoming
+    # webhooks that URL contains the secret token, so never emit those logs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def get_correlation_id() -> str:

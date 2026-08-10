@@ -4,18 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agency-stack"
-version = "0.3.3"
+version = "0.4.15"
 description = "Corporate multi-agent platform with Telegram and Bitrix24 integrations"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "aiogram>=3.29,<4.0",
+  "aiohttp-socks>=0.10,<1.0",
   "aiosqlite>=0.21,<1.0",
   "fastapi>=0.116,<1.0",
-  "httpx>=0.28,<1.0",
+  "httpx[socks]>=0.28,<1.0",
   "uvicorn[standard]>=0.35,<1.0",
   "openai-agents>=0.2,<1.0",
   "pydantic-settings>=2.10,<3.0",
+  "tzdata>=2025.2,<2027.0",
 ]
 
 [project.optional-dependencies]

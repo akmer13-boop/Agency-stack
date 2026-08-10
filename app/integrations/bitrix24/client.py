@@ -14,6 +14,7 @@ BITRIX24_READ_ONLY_METHODS: Final[frozenset[str]] = frozenset(
         "profile",
         "user.current",
         "user.get",
+        "department.get",
         "crm.category.list",
         "crm.status.list",
         "crm.deal.list",
@@ -57,7 +58,16 @@ USER_DIRECTORY_FIELDS: Final[tuple[str, ...]] = (
     "ID",
     "NAME",
     "LAST_NAME",
+    "SECOND_NAME",
     "ACTIVE",
+    "WORK_POSITION",
+    "UF_DEPARTMENT",
+)
+
+DEPARTMENT_DIRECTORY_FIELDS: Final[tuple[str, ...]] = (
+    "ID",
+    "NAME",
+    "PARENT",
 )
 
 
@@ -117,12 +127,14 @@ class Bitrix24ReadOnlyClient:
         timeout_seconds: float = 15.0,
         verify_ssl: bool = True,
         max_pages: int = 20,
+        proxy_url: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._webhook_url = normalize_webhook_url(webhook_url)
         self._timeout = httpx.Timeout(timeout_seconds)
         self._verify_ssl = verify_ssl
         self._max_pages = max_pages
+        self._proxy_url = proxy_url
         self._transport = transport
 
     @property
@@ -151,11 +163,12 @@ class Bitrix24ReadOnlyClient:
                 timeout=self._timeout,
                 verify=self._verify_ssl,
                 follow_redirects=False,
+                proxy=self._proxy_url,
                 transport=self._transport,
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                    "User-Agent": "Agency-Stack/0.3",
+                    "User-Agent": "Agency-Stack/0.4",
                 },
             ) as client:
                 response = await client.post(endpoint, json=payload)
@@ -255,15 +268,36 @@ class Bitrix24ReadOnlyClient:
             raise Bitrix24RequestError("Bitrix24 returned an invalid profile")
         return result
 
-    async def list_users(self, *, max_items: int = 500) -> list[dict[str, Any]]:
-        return await self.call_all(
+    async def list_users(self, *, max_items: int = 1000) -> list[dict[str, Any]]:
+        raw_users = await self.call_all(
             "user.get",
-            {
-                "filter": {"ACTIVE": "Y"},
-                "select": list(USER_DIRECTORY_FIELDS),
-            },
+            {"select": list(USER_DIRECTORY_FIELDS)},
             max_items=max_items,
         )
+        return [
+            {
+                key: item.get(key)
+                for key in USER_DIRECTORY_FIELDS
+                if key in item
+            }
+            for item in raw_users
+            if item.get("ID") is not None
+        ]
+
+    async def list_departments(self) -> list[dict[str, Any]]:
+        response = await self.call("department.get")
+        result = response.get("result")
+        if not isinstance(result, list):
+            raise Bitrix24RequestError("Bitrix24 returned an invalid department list")
+        return [
+            {
+                key: item.get(key)
+                for key in DEPARTMENT_DIRECTORY_FIELDS
+                if key in item
+            }
+            for item in result
+            if isinstance(item, dict) and item.get("ID") is not None
+        ]
 
     async def list_deal_categories(self) -> list[dict[str, Any]]:
         return await self.call_all(

@@ -8,6 +8,7 @@ from app.integrations.bitrix24 import (
     Bitrix24RequestError,
 )
 from app.integrations.bitrix24.compatible_client import CompatibleBitrix24ReadOnlyClient
+from app.proxy import build_proxy_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +27,7 @@ def build_bitrix24_client(settings: Settings) -> CompatibleBitrix24ReadOnlyClien
         timeout_seconds=settings.bitrix24_timeout_seconds,
         verify_ssl=settings.bitrix24_verify_ssl,
         max_pages=settings.bitrix24_max_pages,
+        proxy_url=build_proxy_url(settings, remote_dns=True),
     )
 
 

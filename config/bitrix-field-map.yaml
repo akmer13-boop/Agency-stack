@@ -1,0 +1,39 @@
+# Stage 4.0A verified standard-field mapping
+version: 1
+lead:
+  id: "ID"
+  status_id: "STATUS_ID"
+  status_semantic: "STATUS_SEMANTIC_ID"
+  source_id: "SOURCE_ID"
+  assigned_user_id: "ASSIGNED_BY_ID"
+  created_at: "DATE_CREATE"
+  updated_at: "DATE_MODIFY"
+  amount: "OPPORTUNITY"
+  currency: "CURRENCY_ID"
+deal:
+  id: "ID"
+  pipeline_id: "CATEGORY_ID"
+  stage_id: "STAGE_ID"
+  stage_semantic: "STAGE_SEMANTIC_ID"
+  assigned_user_id: "ASSIGNED_BY_ID"
+  created_at: "DATE_CREATE"
+  updated_at: "DATE_MODIFY"
+  moved_at: "MOVED_TIME"
+  close_date: "CLOSEDATE"
+  amount: "OPPORTUNITY"
+  currency: "CURRENCY_ID"
+user:
+  id: "ID"
+  first_name: "NAME"
+  last_name: "LAST_NAME"
+  middle_name: "SECOND_NAME"
+  active: "ACTIVE"
+  position: "WORK_POSITION"
+  department_ids: "UF_DEPARTMENT"
+department:
+  id: "ID"
+  name: "NAME"
+  parent_id: "PARENT"
+custom_fields:
+  verification_required: true
+  mappings: {}
