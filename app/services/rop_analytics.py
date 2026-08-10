@@ -10,6 +10,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosqlite
 
+from app.semantic.metrics import build_new_leads_metric
+from app.semantic.models import SemanticLead
+from app.semantic.repository import SemanticRepository
 from app.services.rop_catalog import category_label, stage_label
 from app.storage.crm_store import CrmStore
 
@@ -180,18 +183,20 @@ def _build_period_kpi(
     start_at: datetime,
     end_at: datetime,
     deals: list[dict[str, Any]],
-    leads: list[dict[str, Any]],
+    leads: list[SemanticLead],
+    timezone_name: str,
 ) -> PeriodKpi:
-    new_leads = 0
+    new_leads = build_new_leads_metric(
+        leads,
+        period_start=start_at,
+        period_end=end_at,
+        timezone_name=timezone_name,
+        calculated_at=end_at,
+    ).value
     new_deals = 0
     won = 0
     lost = 0
     won_revenue: defaultdict[str, Decimal] = defaultdict(lambda: Decimal("0"))
-
-    for lead in leads:
-        created_at = _datetime(lead.get("DATE_CREATE"))
-        if created_at is not None and start_at <= created_at <= end_at:
-            new_leads += 1
 
     for deal in deals:
         created_at = _datetime(deal.get("DATE_CREATE"))
@@ -259,7 +264,7 @@ async def build_rop_snapshot(
 ) -> RopSnapshot:
     reference = (now or datetime.now(UTC)).astimezone(UTC)
     raw_deals = await _load_raw_entities(database_path, "deal")
-    leads = await _load_raw_entities(database_path, "lead")
+    leads = await SemanticRepository(database_path).leads()
     deals = [
         deal
         for deal in raw_deals
@@ -285,10 +290,13 @@ async def build_rop_snapshot(
     risks: list[DealRisk] = []
     cutoff_24h = reference - timedelta(hours=24)
 
-    for lead in leads:
-        created_at = _datetime(lead.get("DATE_CREATE"))
-        if created_at is not None and created_at >= cutoff_24h:
-            new_leads_24h += 1
+    new_leads_24h = build_new_leads_metric(
+        leads,
+        period_start=cutoff_24h,
+        period_end=reference,
+        timezone_name=timezone_name,
+        calculated_at=reference,
+    ).value
 
     for deal in deals:
         semantic = _semantic(deal)
@@ -362,6 +370,7 @@ async def build_rop_snapshot(
             end_at=reference,
             deals=deals,
             leads=leads,
+            timezone_name=timezone_name,
         )
         for key, label, start_at in _period_windows(reference, timezone_name)
     )
