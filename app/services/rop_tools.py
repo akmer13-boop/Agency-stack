@@ -58,6 +58,10 @@ from app.services.rop_response_evidence import (
     build_lead_response_evidence_report,
     format_lead_response_evidence_for_ai,
 )
+from app.services.rop_response_trend import (
+    build_response_evidence_trend,
+    format_response_evidence_trend_for_ai,
+)
 from app.services.rop_weekend_leads import build_and_format_weekend_leads
 
 
@@ -286,6 +290,23 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_lead_response_evidence_for_ai(report)
 
     @function_tool
+    async def get_rop_lead_response_trend(weeks: int = 4) -> str:
+        """Return mature week-over-week lead response evidence trend.
+
+        Use this tool for questions about whether observed lead reaction
+        speed or response coverage is changing across recent weeks. The
+        comparison is descriptive evidence, not SLA compliance or a
+        statistical significance test.
+
+        Args:
+            weeks: Number of mature calendar-week cohorts from 2 to 12.
+        """
+        if weeks < 2 or weeks > 12:
+            return "Количество недель trend должно быть от 2 до 12."
+        report = await build_response_evidence_trend(settings, weeks)
+        return format_response_evidence_trend_for_ai(report)
+
+    @function_tool
     async def get_rop_first_response_policy() -> str:
         """Return First Response business-rule configuration readiness.
 
@@ -323,6 +344,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_deal_activity,
         get_rop_leads,
         get_rop_lead_response_evidence,
+        get_rop_lead_response_trend,
         get_rop_first_response_policy,
         get_rop_weekend_leads,
     ]

@@ -135,3 +135,18 @@ state is `BLOCKED`. Only a complete supported configuration becomes `READY`.
 
 No values are inferred from Stage 4.3 observed baselines. `READY` is not an SLA
 compliance result and no pass/fail/overdue calculation is performed.
+
+## Stage 4.5 — Response evidence trend
+
+Deterministic trend reporting compares non-overlapping mature calendar-week lead
+cohorts in `ROP_TIMEZONE`.
+
+A technical 7×24h post-create observation horizon is used to make cohorts
+comparable. The horizon is not a customer SLA threshold.
+
+Per cohort the system reports manager-evidence and confirmed-communication
+coverage plus median/p90 elapsed time. Latest-vs-previous deltas are descriptive
+only; statistical significance, causality, SLA compliance and manager ranking
+are not inferred.
+
+Stage 4.4B remains blocked by customer policy decisions.
