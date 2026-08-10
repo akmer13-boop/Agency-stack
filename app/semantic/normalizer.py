@@ -36,9 +36,7 @@ def _datetime(value: Any, *, field: str, entity_type: str) -> datetime | None:
     try:
         result = datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise SemanticMappingError(
-            f"{entity_type}: invalid datetime in {field}: {raw}"
-        ) from exc
+        raise SemanticMappingError(f"{entity_type}: invalid datetime in {field}: {raw}") from exc
     if result.tzinfo is None:
         result = result.replace(tzinfo=UTC)
     return result.astimezone(UTC)
@@ -50,9 +48,7 @@ def _decimal(value: Any, *, field: str, entity_type: str) -> Decimal:
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
-        raise SemanticMappingError(
-            f"{entity_type}: invalid decimal in {field}: {value}"
-        ) from exc
+        raise SemanticMappingError(f"{entity_type}: invalid decimal in {field}: {value}") from exc
 
 
 def _bool(value: Any) -> bool:
@@ -151,6 +147,12 @@ def normalize_activity(payload: Mapping[str, Any]) -> SemanticActivity:
             entity_type=entity_type,
         ),
         completed=_bool(payload.get("COMPLETED")),
+        provider_id=_optional_text(payload.get("PROVIDER_ID")),
+        provider_type_id=_optional_text(payload.get("PROVIDER_TYPE_ID")),
+        direction=_optional_text(payload.get("DIRECTION")),
+        author_user_id=_optional_text(payload.get("AUTHOR_ID")),
+        editor_user_id=_optional_text(payload.get("EDITOR_ID")),
+        autocomplete_rule=_optional_text(payload.get("AUTOCOMPLETE_RULE")),
     )
 
 
@@ -160,9 +162,7 @@ def normalize_stage_event(
     entity_type: str,
 ) -> SemanticStageEvent:
     if entity_type not in {"lead_stage_history", "deal_stage_history"}:
-        raise SemanticMappingError(
-            f"stage history: unsupported entity_type {entity_type}"
-        )
+        raise SemanticMappingError(f"stage history: unsupported entity_type {entity_type}")
 
     if entity_type == "lead_stage_history":
         stage_id = payload.get("STATUS_ID")
@@ -193,9 +193,7 @@ def normalize_user(payload: Mapping[str, Any]) -> SemanticUser:
         department_ids: tuple[str, ...] = ()
     elif isinstance(departments, (list, tuple)):
         department_ids = tuple(
-            text
-            for item in departments
-            if (text := _optional_text(item)) is not None
+            text for item in departments if (text := _optional_text(item)) is not None
         )
     else:
         value = _optional_text(departments)

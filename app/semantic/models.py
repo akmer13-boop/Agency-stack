@@ -48,6 +48,12 @@ class SemanticActivity:
     updated_at: datetime | None
     deadline_at: datetime | None
     completed: bool
+    provider_id: str | None = None
+    provider_type_id: str | None = None
+    direction: str | None = None
+    author_user_id: str | None = None
+    editor_user_id: str | None = None
+    autocomplete_rule: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
