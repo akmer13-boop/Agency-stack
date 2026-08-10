@@ -71,6 +71,8 @@ class LeadIntelligenceReport:
     active_attention_3d: int
     active_critical_5d: int
     current_statuses: tuple[LeadStatusStat, ...]
+    status_entries: tuple[LeadStatusStat, ...]
+    final_statuses: tuple[LeadStatusStat, ...]
     new_sources: tuple[LeadSourceStat, ...]
     crm_activities: int
     completed_activities: int
@@ -79,6 +81,7 @@ class LeadIntelligenceReport:
     communication_type_counts: tuple[tuple[str, int], ...]
     managers: tuple[LeadManagerStat, ...]
     catalog_loaded: bool
+    history_schema_ready: bool
 
 
 async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str, Any]]:
@@ -193,9 +196,23 @@ def _status_semantic(
     return catalog if catalog in {"S", "F", "P"} else "P"
 
 
-def _history_semantic(item: dict[str, Any]) -> str:
-    semantic = _text(item.get("STAGE_SEMANTIC_ID"), "P").upper()
-    return semantic if semantic in {"S", "F", "P"} else "P"
+def _history_status_id(item: dict[str, Any]) -> str:
+    status_id = _text(item.get("STATUS_ID"), "")
+    if status_id:
+        return status_id
+    return _text(item.get("STAGE_ID"), "")
+
+
+def _history_semantic(
+    item: dict[str, Any],
+    status_semantics: dict[str, str],
+) -> str:
+    for key in ("STATUS_SEMANTIC_ID", "STAGE_SEMANTIC_ID"):
+        semantic = _text(item.get(key), "").upper()
+        if semantic in {"S", "F", "P"}:
+            return semantic
+    catalog = status_semantics.get(_history_status_id(item), "").upper()
+    return catalog if catalog in {"S", "F", "P"} else "P"
 
 
 def _timezone(name: str) -> ZoneInfo:
@@ -389,30 +406,62 @@ async def build_lead_intelligence(
             and start_at <= event_at <= reference
         )
     ]
+    history_schema_ready = all(
+        item.get("STATUS_ID") not in (None, "")
+        and item.get("STATUS_SEMANTIC_ID") not in (None, "")
+        for item in events_in_window
+    )
     leads_with_status_events = {
         _text(item.get("OWNER_ID"), "")
         for item in events_in_window
         if _text(item.get("OWNER_ID"), "")
     }
+
+    status_entry_counts: Counter[tuple[str, str]] = Counter()
+    latest_final_by_owner: dict[str, dict[str, Any]] = {}
+    for item in events_in_window:
+        owner_id = _text(item.get("OWNER_ID"), "")
+        status_id = _history_status_id(item)
+        semantic = _history_semantic(item, status_semantics)
+        if status_id:
+            status_entry_counts[(status_id, semantic)] += 1
+        if not owner_id or semantic not in {"S", "F"}:
+            continue
+        previous = latest_final_by_owner.get(owner_id)
+        previous_at = _datetime(previous.get("CREATED_TIME")) if previous else None
+        current_at = _datetime(item.get("CREATED_TIME"))
+        if previous is None or previous_at is None or (
+            current_at is not None and current_at >= previous_at
+        ):
+            latest_final_by_owner[owner_id] = item
+
     successful_owners = {
-        _text(item.get("OWNER_ID"), "")
-        for item in events_in_window
-        if _history_semantic(item) == "S" and _text(item.get("OWNER_ID"), "")
+        owner_id
+        for owner_id, item in latest_final_by_owner.items()
+        if _history_semantic(item, status_semantics) == "S"
     }
     failed_owners = {
-        _text(item.get("OWNER_ID"), "")
-        for item in events_in_window
-        if _history_semantic(item) == "F" and _text(item.get("OWNER_ID"), "")
+        owner_id
+        for owner_id, item in latest_final_by_owner.items()
+        if _history_semantic(item, status_semantics) == "F"
     }
 
-    for owner_id in successful_owners:
+    final_status_counts: Counter[tuple[str, str]] = Counter()
+    for owner_id, item in latest_final_by_owner.items():
+        status_id = _history_status_id(item)
+        semantic = _history_semantic(item, status_semantics)
+        if status_id:
+            final_status_counts[(status_id, semantic)] += 1
         lead = lead_by_id.get(owner_id)
-        manager_id = _text(lead.get("ASSIGNED_BY_ID"), "не назначен") if lead else "не назначен"
-        manager_counters[manager_id]["success"] += 1
-    for owner_id in failed_owners:
-        lead = lead_by_id.get(owner_id)
-        manager_id = _text(lead.get("ASSIGNED_BY_ID"), "не назначен") if lead else "не назначен"
-        manager_counters[manager_id]["failed"] += 1
+        manager_id = (
+            _text(lead.get("ASSIGNED_BY_ID"), "не назначен")
+            if lead
+            else "не назначен"
+        )
+        if semantic == "S":
+            manager_counters[manager_id]["success"] += 1
+        elif semantic == "F":
+            manager_counters[manager_id]["failed"] += 1
 
     activity_type_counts: Counter[str] = Counter()
     communication_type_counts: Counter[str] = Counter()
@@ -442,6 +491,24 @@ async def build_lead_intelligence(
             count=count,
         )
         for (status_id, semantic), count in current_status_counts.most_common()
+    )
+    status_entries = tuple(
+        LeadStatusStat(
+            status_id=status_id,
+            label=status_labels.get(status_id, status_id),
+            semantic=semantic,
+            count=count,
+        )
+        for (status_id, semantic), count in status_entry_counts.most_common()
+    )
+    final_statuses = tuple(
+        LeadStatusStat(
+            status_id=status_id,
+            label=status_labels.get(status_id, status_id),
+            semantic=semantic,
+            count=count,
+        )
+        for (status_id, semantic), count in final_status_counts.most_common()
     )
     new_sources = tuple(
         LeadSourceStat(
@@ -486,6 +553,8 @@ async def build_lead_intelligence(
         active_attention_3d=active_attention,
         active_critical_5d=active_critical,
         current_statuses=current_statuses,
+        status_entries=status_entries,
+        final_statuses=final_statuses,
         new_sources=new_sources,
         crm_activities=crm_activities,
         completed_activities=completed_activities,
@@ -494,6 +563,7 @@ async def build_lead_intelligence(
         communication_type_counts=tuple(communication_type_counts.most_common()),
         managers=managers,
         catalog_loaded=catalog_loaded,
+        history_schema_ready=history_schema_ready,
     )
 
 
@@ -546,14 +616,41 @@ def format_lead_intelligence(
         "\nДвижение статусов за окно:",
         f"• Лидов с событиями статуса: {report.leads_with_status_events}",
         f"• Событий статуса: {report.status_events}",
-        f"• Успешных финализаций: {report.successful_finalizations}",
-        f"• Неуспешных финализаций: {report.failed_finalizations}",
-        "• Доля успешных среди финализированных переходов: "
-        f"{_finalized_share(report)}",
-        "\nAging активных лидов:",
-        f"• без движения ≥3 дней: {report.active_attention_3d}",
-        f"• без движения ≥5 дней: {report.active_critical_5d}",
     ]
+    if report.history_schema_ready:
+        lines.extend(
+            [
+                f"• Успешных финализаций: {report.successful_finalizations}",
+                f"• Неуспешных финализаций: {report.failed_finalizations}",
+                "• Доля успешных среди финализированных переходов: "
+                f"{_finalized_share(report)}",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "• Финализации S/F: временно не считаются достоверными — локальная "
+                "lead_stage_history сохранена в старом формате без STATUS_*;",
+                "• Выполните /bitrix_sync_incremental на версии 0.4.13+: история лидов "
+                "будет автоматически перечитана read-only один раз.",
+            ]
+        )
+
+    if report.history_schema_ready and report.status_entries:
+        lines.append("\nВходы в статусы за окно:")
+        lines.extend(_status_line(item) for item in report.status_entries[:10])
+
+    if report.history_schema_ready and report.final_statuses:
+        lines.append("\nФинализации по статусам за окно:")
+        lines.extend(_status_line(item) for item in report.final_statuses[:10])
+
+    lines.extend(
+        [
+            "\nAging активных лидов:",
+            f"• без движения ≥3 дней: {report.active_attention_3d}",
+            f"• без движения ≥5 дней: {report.active_critical_5d}",
+        ]
+    )
 
     if report.current_statuses:
         lines.append("\nТекущие статусы лидов:")
@@ -589,12 +686,26 @@ def format_lead_intelligence(
             _manager_line(item, directory)
             for item in report.managers[:manager_limit]
         )
+        unresolved = sum(
+            1
+            for item in report.managers[:manager_limit]
+            if item.assigned_by_id not in directory.users
+            and item.assigned_by_id != "не назначен"
+        )
+        if unresolved:
+            lines.append(
+                f"• Справочник сотрудников не разрешил {unresolved} из показанных "
+                "manager ID. Начиная с 0.4.13 обычный Bitrix sync обновляет directory "
+                "автоматически."
+            )
 
     lines.extend(
         [
             "\nМетодология:",
             "• успешная/неуспешная финализация считается по lead_stage_history "
-            "(semantic S/F), а не как созданная сделка;",
+            "(STATUS_SEMANTIC_ID S/F), а не как созданная сделка;",
+            "• если один лид несколько раз попал в финальный статус в окне, для итогового "
+            "S/F берётся его последнее финальное событие;",
             "• доля успешных среди финализированных — не lead→deal cohort conversion;",
             "• менеджер финализации определяется по текущему ASSIGNED_BY_ID лида, "
             "поскольку stage history не хранит исторического ответственного;",
@@ -639,5 +750,8 @@ def format_lead_intelligence_for_ai(
         f"{text}\n"
         "AI guardrail: не дели новые сделки на новые лиды и не называй это "
         "lead→deal conversion. Не называй менеджера худшим без явной метрики; "
-        "формулируй, по какому показателю его профиль наиболее тревожный."
+        "формулируй, по какому показателю его профиль наиболее тревожный. "
+        "Если history_schema не готова, не трактуй S/F=0 как бизнес-факт. "
+        "Этот tool возвращает агрегаты, а не список lead ID: не обещай выгрузить список "
+        "лидов, карточки или manager-specific export без отдельного доступного tool."
     )
