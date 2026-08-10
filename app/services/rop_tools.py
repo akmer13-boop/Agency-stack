@@ -50,6 +50,10 @@ from app.services.rop_recent_activity import (
     build_recent_deal_activity,
     format_recent_deal_activity_for_ai,
 )
+from app.services.rop_response_evidence import (
+    build_lead_response_evidence_report,
+    format_lead_response_evidence_for_ai,
+)
 from app.services.rop_weekend_leads import build_and_format_weekend_leads
 
 
@@ -261,6 +265,23 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         )
 
     @function_tool
+    async def get_rop_lead_response_evidence(days: int = 7) -> str:
+        """Return observed lead response evidence for the rolling last N days.
+
+        Use this tool when the user asks how quickly new leads receive a first
+        observable manager-side action or confirmed CRM communication. The tool
+        returns calendar elapsed evidence only. It does not calculate First
+        Response SLA compliance, business-hours timing, or manager ranking.
+
+        Args:
+            days: Rolling cohort lookback from 1 to 365 days.
+        """
+        if days < 1 or days > 365:
+            return "Период response evidence должен быть от 1 до 365 дней."
+        report = await build_lead_response_evidence_report(settings, days)
+        return format_lead_response_evidence_for_ai(report)
+
+    @function_tool
     async def get_rop_weekend_leads() -> str:
         """Return exact lead cohort and manager processing facts for the weekend.
 
@@ -286,5 +307,6 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_deal,
         get_rop_deal_activity,
         get_rop_leads,
+        get_rop_lead_response_evidence,
         get_rop_weekend_leads,
     ]

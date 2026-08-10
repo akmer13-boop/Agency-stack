@@ -147,6 +147,16 @@ def normalize_activity(payload: Mapping[str, Any]) -> SemanticActivity:
             entity_type=entity_type,
         ),
         completed=_bool(payload.get("COMPLETED")),
+        started_at=_datetime(
+            payload.get("START_TIME"),
+            field="START_TIME",
+            entity_type=entity_type,
+        ),
+        ended_at=_datetime(
+            payload.get("END_TIME"),
+            field="END_TIME",
+            entity_type=entity_type,
+        ),
         provider_id=_optional_text(payload.get("PROVIDER_ID")),
         provider_type_id=_optional_text(payload.get("PROVIDER_TYPE_ID")),
         direction=_optional_text(payload.get("DIRECTION")),

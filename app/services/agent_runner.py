@@ -50,9 +50,13 @@ _ROP_TOOL_INSTRUCTIONS = (
     "get_rop_leads считает успешные/неуспешные финализации по lead stage history. "
     "Не называй успешную финализацию лида созданной сделкой и не считай lead→deal "
     "conversion как new_deals/new_leads: это не одна когорта. "
-    "First-response SLA по лидам не выводи, пока отдельный инструмент его не измеряет. "
-    "Медиану до первой подтверждённой CRM-коммуникации из get_rop_weekend_leads называй "
-    "наблюдаемым CRM-фактом, а не first-response SLA и не гарантированным первым ответом. "
+    "Для вопросов о времени до первой реакции, первого наблюдаемого действия или первой "
+    "коммуникации по новым лидам используй get_rop_lead_response_evidence. Этот tool "
+    "возвращает calendar elapsed evidence, а не First Response SLA: не называй его "
+    "нормативом, соблюдением SLA, просрочкой или гарантированным временем первого ответа. "
+    "Рабочие часы, выходные, праздники, reassignment и SLA threshold пока не утверждены. "
+    "Медиану до первой подтверждённой CRM-коммуникации из get_rop_weekend_leads также "
+    "называй наблюдаемым CRM-фактом, а не first-response SLA. "
     "Для вопроса 'что делать сегодня' или 'куда вмешаться' сначала используй get_rop_focus. "
     "Для SLA используй get_rop_sla, а для скорости прохождения — get_rop_cycle_time. "
     "Для вопроса о конкретной сделке по ID обязательно используй get_rop_deal. "
@@ -157,9 +161,7 @@ def build_agent_input(
 
 def _is_weekend_lead_query(message: str) -> bool:
     normalized = " ".join(message.lower().split())
-    weekend = "выходн" in normalized or (
-        "суббот" in normalized and "воскрес" in normalized
-    )
+    weekend = "выходн" in normalized or ("суббот" in normalized and "воскрес" in normalized)
     intent = any(
         token in normalized
         for token in ("сколько", "приш", "поступ", "отработ", "обработ", "менедж")
@@ -187,11 +189,7 @@ async def execute_agent(
     role: UserRole = UserRole.EMPLOYEE,
     history: Sequence[ConversationMessage] = (),
 ) -> AgentRunResult:
-    if (
-        role in _ANALYTICS_ROLES
-        and route in _ANALYTICS_ROUTES
-        and _is_weekend_lead_query(message)
-    ):
+    if role in _ANALYTICS_ROLES and route in _ANALYTICS_ROUTES and _is_weekend_lead_query(message):
         return AgentRunResult(
             answer=await build_and_format_weekend_leads(settings),
             agent="ИИ-РОП · Weekend Leads",
