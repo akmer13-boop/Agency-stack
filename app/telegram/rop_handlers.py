@@ -64,6 +64,10 @@ from app.services.rop_scheduler import (
     build_rop_scheduler_plan,
     format_rop_scheduler_plan,
 )
+from app.services.rop_scheduler_health import (
+    build_rop_scheduler_health,
+    format_rop_scheduler_health,
+)
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
@@ -348,6 +352,18 @@ async def rop_scheduler_status_handler(
         return
     plan = build_rop_scheduler_plan(settings)
     await _send_long_text(message, format_rop_scheduler_plan(plan), settings)
+
+
+@router.message(Command("rop_scheduler_health"))
+async def rop_scheduler_health_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    report = build_rop_scheduler_health(settings)
+    await _send_long_text(message, format_rop_scheduler_health(report), settings)
 
 
 @router.message(Command("rop_deal"))
