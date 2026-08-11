@@ -31,7 +31,7 @@ Bitrix24 → raw sync → mapping/semantic layer → deterministic analytics →
 | Natural-language tools | DONE/PARTIAL | expand deterministic routing |
 | Bitrix entity URLs | MISSING | add URL builder |
 | Daily report | PARTIAL | align customer blocks |
-| Daily/weekly scheduler | PARTIAL | Stage 4.6A executor + durable delivery; activation/HA review pending |
+| Daily/weekly scheduler | PARTIAL | Stage 4.6A executor + Stage 4.6B health; activation/HA review pending |
 | Deleted entity reconciliation | MISSING | add tombstone/reconciliation |
 | First response / SLA | BLOCKED_BY_BUSINESS_DECISION | approve event + rules |
 | КП staleness | BLOCKED_BY_BUSINESS_DECISION | approve КП event + limits |
@@ -39,7 +39,7 @@ Bitrix24 → raw sync → mapping/semantic layer → deterministic analytics →
 | Manager rating | BLOCKED_BY_BUSINESS_DECISION | approve weights/sample |
 | Script compliance | BLOCKED_BY_INPUT | scripts + sources + privacy |
 | AI Coach | FUTURE | after analytics stability |
-| Observability | PARTIAL | readiness/dependency checks |
+| Observability | PARTIAL | scheduler structured health added; broaden dependency checks |
 
 ## Preserve
 - Bitrix read-only safety

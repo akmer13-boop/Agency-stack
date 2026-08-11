@@ -44,6 +44,10 @@ def test_health_reports_safe_runtime_state(client: TestClient) -> None:
         "telegram_configured": False,
         "bitrix24_configured": False,
         "crm_write_enabled": False,
+        "rop_scheduler_state": "disabled",
+        "rop_scheduler_health": "disabled",
+        "rop_scheduler_last_tick_at": None,
+        "rop_scheduler_consecutive_failures": 0,
     }
     assert response.headers["X-Correlation-ID"]
 

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.21"
+    app_version: str = "0.4.22"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     rop_scheduler_recipient_ids: str = ""
     rop_scheduler_poll_seconds: int = Field(default=30, ge=5, le=3600)
     rop_scheduler_state_path: str = "data/rop_scheduler_state.json"
+    rop_scheduler_health_path: str = "data/rop_scheduler_health.json"
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)

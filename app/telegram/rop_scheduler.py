@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import partial
 
 from aiogram import Bot
 
@@ -19,9 +21,26 @@ from app.services.rop_scheduler import (
     build_rop_scheduler_plan,
     due_rop_scheduler_deliveries,
 )
+from app.services.rop_scheduler_health import RopSchedulerHealthStore
 from app.telegram.messages import split_telegram_text
 
 logger = logging.getLogger(__name__)
+
+
+def _record_scheduler_health(
+    operation: str,
+    callback: Callable[[], None],
+) -> None:
+    try:
+        callback()
+    except Exception:
+        logger.exception(
+            "ROP scheduler health state write failed",
+            extra={
+                "event": "rop_scheduler_health_write_failed",
+                "health_operation": operation,
+            },
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +170,12 @@ async def run_rop_scheduler(
     settings: Settings,
 ) -> None:
     plan = build_rop_scheduler_plan(settings)
+    health_store = RopSchedulerHealthStore(settings.rop_scheduler_health_path)
+    startup_at = datetime.now(UTC)
+    _record_scheduler_health(
+        "startup",
+        lambda: health_store.record_startup(plan.state, at=startup_at),
+    )
 
     logger.info(
         "ROP scheduler startup",
@@ -167,8 +192,29 @@ async def run_rop_scheduler(
         return
 
     while True:
+        tick_started_at = datetime.now(UTC)
+        _record_scheduler_health(
+            "tick_started",
+            partial(
+                health_store.record_tick_started,
+                plan.state,
+                at=tick_started_at,
+            ),
+        )
         try:
             result = await run_rop_scheduler_tick(bot, settings)
+            tick_completed_at = datetime.now(UTC)
+            _record_scheduler_health(
+                "tick_completed",
+                partial(
+                    health_store.record_tick_completed,
+                    plan.state,
+                    due=result.due,
+                    delivered=result.delivered,
+                    failed=result.failed,
+                    at=tick_completed_at,
+                ),
+            )
             logger.info(
                 "ROP scheduler tick completed",
                 extra={
@@ -181,6 +227,16 @@ async def run_rop_scheduler(
         except asyncio.CancelledError:
             raise
         except Exception:
+            tick_failed_at = datetime.now(UTC)
+            _record_scheduler_health(
+                "tick_error",
+                partial(
+                    health_store.record_tick_error,
+                    plan.state,
+                    error_code="tick_failed",
+                    at=tick_failed_at,
+                ),
+            )
             logger.exception(
                 "ROP scheduler tick failed",
                 extra={"event": "rop_scheduler_tick_failed"},
