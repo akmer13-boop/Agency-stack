@@ -60,6 +60,10 @@ from app.services.rop_recent_activity import (
     build_recent_deal_activity,
     format_recent_deal_activity,
 )
+from app.services.rop_scheduler import (
+    build_rop_scheduler_plan,
+    format_rop_scheduler_plan,
+)
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
@@ -334,6 +338,18 @@ async def rop_daily_handler(
     await _send_long_text(message, text, settings)
 
 
+@router.message(Command("rop_scheduler_status"))
+async def rop_scheduler_status_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    if not await _authorize(message, settings, conversation_store):
+        return
+    plan = build_rop_scheduler_plan(settings)
+    await _send_long_text(message, format_rop_scheduler_plan(plan), settings)
+
+
 @router.message(Command("rop_deal"))
 async def rop_deal_handler(
     message: Message,
@@ -355,25 +371,17 @@ async def rop_deal_handler(
             deal_id,
             include_timeline_comments=True,
         )
-        evidence = (
-            await build_deal_stage_evidence(settings, report)
-            if report is not None
-            else None
-        )
+        evidence = await build_deal_stage_evidence(settings, report) if report is not None else None
         risk = (
             build_activity_aware_risk(report, evidence)
             if report is not None and evidence is not None
             else None
         )
         vitality = (
-            build_deal_vitality(report, risk)
-            if report is not None and risk is not None
-            else None
+            build_deal_vitality(report, risk) if report is not None and risk is not None else None
         )
     if report is None or evidence is None or risk is None or vitality is None:
-        await message.answer(
-            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
-        )
+        await message.answer(f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.")
         return
 
     base_text = format_deal_drilldown(
@@ -426,14 +434,10 @@ async def rop_deal_activity_handler(
             include_timeline_comments=False,
         )
         activity = (
-            await build_recent_deal_activity(settings, report, days)
-            if report is not None
-            else None
+            await build_recent_deal_activity(settings, report, days) if report is not None else None
         )
     if report is None or activity is None:
-        await message.answer(
-            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM."
-        )
+        await message.answer(f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.")
         return
 
     text = format_recent_deal_activity(
