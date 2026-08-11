@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.22"
+    app_version: str = "0.4.23"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     bitrix24_sync_retry_backoff_seconds: float = Field(default=2.0, ge=0.1, le=30.0)
     bitrix24_sync_page_delay_seconds: float = Field(default=0.25, ge=0.0, le=5.0)
     bitrix24_sync_overlap_minutes: int = Field(default=5, ge=0, le=120)
+    bitrix24_reconciliation_audit_path: str = ""
 
     rop_attention_days: int = Field(default=3, ge=1, le=365)
     rop_critical_days: int = Field(default=5, ge=1, le=365)
@@ -111,6 +113,13 @@ class Settings(BaseSettings):
     @property
     def bitrix24_sync_item_limit(self) -> int | None:
         return self.bitrix24_sync_max_items_per_entity or None
+
+    @property
+    def bitrix24_reconciliation_audit_file(self) -> str:
+        configured = self.bitrix24_reconciliation_audit_path.strip()
+        if configured:
+            return configured
+        return str(Path(self.database_path).with_name("bitrix_reconciliation_audit.json"))
 
     @property
     def rop_included_categories(self) -> frozenset[str]:

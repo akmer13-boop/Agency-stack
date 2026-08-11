@@ -76,9 +76,7 @@ class CrmStore:
     async def start_run(self) -> int:
         async with aiosqlite.connect(self.database_path) as database:
             await _prepare_connection(database)
-            cursor = await database.execute(
-                "INSERT INTO crm_sync_runs (status) VALUES ('running')"
-            )
+            cursor = await database.execute("INSERT INTO crm_sync_runs (status) VALUES ('running')")
             await database.commit()
             return int(cursor.lastrowid)
 
@@ -176,6 +174,20 @@ class CrmStore:
             )
             await database.commit()
         return len(rows)
+
+    async def list_entity_ids(self, entity_type: str) -> set[str]:
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            cursor = await database.execute(
+                """
+                SELECT entity_id
+                FROM crm_raw_entities
+                WHERE entity_type = ?
+                """,
+                (entity_type,),
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]) for row in rows}
 
     async def count_by_type(self) -> dict[str, int]:
         async with aiosqlite.connect(self.database_path) as database:

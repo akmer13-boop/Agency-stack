@@ -14,6 +14,13 @@ from app.integrations.bitrix24 import (
 )
 from app.integrations.bitrix24.sync_client import SyncBitrix24Client
 from app.proxy import build_proxy_url
+from app.services.bitrix24_reconciliation import (
+    RECONCILIABLE_ENTITY_TYPES,
+    BitrixReconciliationAudit,
+    build_and_store_bitrix_reconciliation_audit,
+    format_bitrix_reconciliation_audit,
+    get_last_bitrix_reconciliation_audit,
+)
 from app.storage.crm_store import CrmStore, CrmSyncRunStatus
 
 
@@ -28,6 +35,7 @@ class BitrixSyncResult:
     mode: str = "full"
     checkpoint: str | None = None
     lead_history_repaired: bool = False
+    reconciliation_audit: BitrixReconciliationAudit | None = None
 
 
 def build_sync_client(settings: Settings) -> SyncBitrix24Client:
@@ -50,11 +58,15 @@ async def _sync_pages(
     entity_type: str,
     pages: AsyncIterator[list[dict[str, Any]]],
     modified_field: str,
+    *,
+    observed_ids: set[str] | None = None,
 ) -> None:
     counts[entity_type] = 0
     await store.update_run_progress(run_id, counts)
 
     async for page in pages:
+        if observed_ids is not None:
+            observed_ids.update(str(item["ID"]) for item in page if item.get("ID") is not None)
         written = await store.upsert_entities(
             entity_type,
             page,
@@ -123,8 +135,11 @@ async def _run_bitrix_sync(
     client = build_sync_client(settings)
     limit = settings.bitrix24_sync_item_limit
     counts: dict[str, int] = {}
-    lead_history_repaired = (
-        mode == "incremental" and await _lead_history_needs_repair(settings.database_path)
+    observed_ids_by_type: dict[str, set[str]] = (
+        {entity_type: set() for entity_type in RECONCILIABLE_ENTITY_TYPES} if mode == "full" else {}
+    )
+    lead_history_repaired = mode == "incremental" and await _lead_history_needs_repair(
+        settings.database_path
     )
     lead_history_since = None if lead_history_repaired else modified_since
 
@@ -136,6 +151,7 @@ async def _run_bitrix_sync(
             "deal",
             client.iter_sync_deals(max_items=limit, modified_since=modified_since),
             "DATE_MODIFY",
+            observed_ids=observed_ids_by_type.get("deal"),
         )
         await _sync_pages(
             store,
@@ -144,6 +160,7 @@ async def _run_bitrix_sync(
             "lead",
             client.iter_sync_leads(max_items=limit, modified_since=modified_since),
             "DATE_MODIFY",
+            observed_ids=observed_ids_by_type.get("lead"),
         )
         await _sync_pages(
             store,
@@ -152,6 +169,7 @@ async def _run_bitrix_sync(
             "contact",
             client.iter_sync_contacts(max_items=limit, modified_since=modified_since),
             "DATE_MODIFY",
+            observed_ids=observed_ids_by_type.get("contact"),
         )
         await _sync_pages(
             store,
@@ -160,6 +178,7 @@ async def _run_bitrix_sync(
             "company",
             client.iter_sync_companies(max_items=limit, modified_since=modified_since),
             "DATE_MODIFY",
+            observed_ids=observed_ids_by_type.get("company"),
         )
         await _sync_pages(
             store,
@@ -168,6 +187,7 @@ async def _run_bitrix_sync(
             "activity",
             client.iter_sync_activities(max_items=limit, modified_since=modified_since),
             "LAST_UPDATED",
+            observed_ids=observed_ids_by_type.get("activity"),
         )
         await _sync_pages(
             store,
@@ -202,12 +222,24 @@ async def _run_bitrix_sync(
         raise
 
     await store.finish_run(run_id, counts)
+
+    reconciliation_audit = None
+    if mode == "full":
+        reconciliation_audit = await build_and_store_bitrix_reconciliation_audit(
+            settings,
+            store,
+            run_id=run_id,
+            observed_ids_by_type=observed_ids_by_type,
+            item_limit=limit,
+        )
+
     return BitrixSyncResult(
         run_id=run_id,
         counts=counts,
         mode=mode,
         checkpoint=modified_since,
         lead_history_repaired=lead_history_repaired,
+        reconciliation_audit=reconciliation_audit,
     )
 
 
@@ -223,9 +255,7 @@ async def run_incremental_bitrix_sync(settings: Settings) -> BitrixSyncResult:
     await store.initialize()
     last_completed_start = await store.get_last_completed_run_started_at()
     if not last_completed_start:
-        raise Bitrix24SyncStateError(
-            "Incremental sync requires at least one completed full sync"
-        )
+        raise Bitrix24SyncStateError("Incremental sync requires at least one completed full sync")
 
     checkpoint = _checkpoint_with_overlap(
         last_completed_start,
@@ -236,6 +266,12 @@ async def run_incremental_bitrix_sync(settings: Settings) -> BitrixSyncResult:
         mode="incremental",
         modified_since=checkpoint,
     )
+
+
+def get_bitrix_reconciliation_status(
+    settings: Settings,
+) -> BitrixReconciliationAudit | None:
+    return get_last_bitrix_reconciliation_audit(settings)
 
 
 async def get_bitrix_sync_status(settings: Settings) -> tuple[CrmSyncRunStatus, dict[str, int]]:
@@ -281,6 +317,8 @@ def format_sync_result(result: BitrixSyncResult) -> str:
     lines = [f"Bitrix24 full sync завершён. Run #{result.run_id}"]
     for entity_type, count in result.counts.items():
         lines.append(f"• {labels.get(entity_type, entity_type)}: {count}")
+    if result.reconciliation_audit is not None:
+        lines.append("\n" + format_bitrix_reconciliation_audit(result.reconciliation_audit))
     lines.append(
         "Пагинация пройдена до реального конца данных по ID-cursor. "
         "Справочник сотрудников/подразделений обновлён в том же read-only запуске. "

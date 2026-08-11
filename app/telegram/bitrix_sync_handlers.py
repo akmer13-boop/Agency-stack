@@ -11,10 +11,12 @@ from app.integrations.bitrix24 import (
     Bitrix24ConfigurationError,
     Bitrix24RequestError,
 )
+from app.services.bitrix24_reconciliation import format_bitrix_reconciliation_audit
 from app.services.bitrix24_sync import (
     Bitrix24SyncStateError,
     format_sync_result,
     format_sync_status,
+    get_bitrix_reconciliation_status,
     get_bitrix_sync_status,
     run_incremental_bitrix_sync,
     run_initial_bitrix_sync,
@@ -75,8 +77,7 @@ async def _can_run_sync(
 
     if _sync_lock.locked():
         await message.answer(
-            "Синхронизация Bitrix24 уже выполняется. "
-            "Используйте /bitrix_sync_status."
+            "Синхронизация Bitrix24 уже выполняется. Используйте /bitrix_sync_status."
         )
         return False
     return True
@@ -147,6 +148,30 @@ async def bitrix_sync_incremental_handler(
         return
 
     await _send_long_text(message, format_sync_result(result), settings)
+
+
+@router.message(Command("bitrix_reconciliation_status"))
+async def bitrix_reconciliation_status_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    user_id = _user_id(message)
+    if not is_telegram_user_allowed(user_id, settings):
+        await message.answer("Доступ к Agency Stack не предоставлен.")
+        return
+
+    role = await _sync_user(message, settings, conversation_store)
+    if role not in SYNC_STATUS_ROLES:
+        await message.answer("Reconciliation audit недоступен для вашей роли.")
+        return
+
+    audit = get_bitrix_reconciliation_status(settings)
+    await _send_long_text(
+        message,
+        format_bitrix_reconciliation_audit(audit),
+        settings,
+    )
 
 
 @router.message(Command("bitrix_sync_status"))
