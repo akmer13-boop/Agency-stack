@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.aiohttp import AiohttpSession
@@ -15,6 +16,7 @@ from app.telegram.handlers import router
 from app.telegram.rate_limit import UserRateLimiter
 from app.telegram.rop_handlers import router as rop_router
 from app.telegram.rop_lead_handlers import router as rop_lead_router
+from app.telegram.rop_scheduler import run_rop_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -71,15 +73,24 @@ async def run_telegram_bot() -> None:
             "database_path": settings.database_path,
         },
     )
-    await dispatcher.start_polling(
-        bot,
-        settings=settings,
-        rate_limiter=rate_limiter,
-        conversation_store=conversation_store,
-        polling_timeout=settings.telegram_polling_timeout_seconds,
-        tasks_concurrency_limit=8,
-        allowed_updates=dispatcher.resolve_used_update_types(),
+    scheduler_task = asyncio.create_task(
+        run_rop_scheduler(bot, settings),
+        name="rop-scheduler",
     )
+    try:
+        await dispatcher.start_polling(
+            bot,
+            settings=settings,
+            rate_limiter=rate_limiter,
+            conversation_store=conversation_store,
+            polling_timeout=settings.telegram_polling_timeout_seconds,
+            tasks_concurrency_limit=8,
+            allowed_updates=dispatcher.resolve_used_update_types(),
+        )
+    finally:
+        scheduler_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await scheduler_task
 
 
 def main() -> None:

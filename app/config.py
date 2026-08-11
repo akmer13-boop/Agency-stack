@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.20"
+    app_version: str = "0.4.21"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -85,6 +85,15 @@ class Settings(BaseSettings):
     rop_first_response_clock: str = ""
     rop_first_response_reassignment_mode: str = ""
     rop_first_response_threshold_seconds: int = Field(default=0, ge=0, le=604_800)
+    rop_scheduler_enabled: bool = False
+    rop_scheduler_daily_enabled: bool = False
+    rop_scheduler_daily_time: str = ""
+    rop_scheduler_weekly_enabled: bool = False
+    rop_scheduler_weekly_day: str = ""
+    rop_scheduler_weekly_time: str = ""
+    rop_scheduler_recipient_ids: str = ""
+    rop_scheduler_poll_seconds: int = Field(default=30, ge=5, le=3600)
+    rop_scheduler_state_path: str = "data/rop_scheduler_state.json"
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
@@ -109,6 +118,13 @@ class Settings(BaseSettings):
     @property
     def rop_excluded_stages(self) -> frozenset[str]:
         return _parse_text_set(self.rop_excluded_stage_ids)
+
+    @property
+    def rop_scheduler_recipients(self) -> frozenset[int]:
+        return _parse_id_list(
+            self.rop_scheduler_recipient_ids,
+            variable_name="ROP_SCHEDULER_RECIPIENT_IDS",
+        )
 
     @property
     def proxy_configured(self) -> bool:

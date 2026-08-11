@@ -31,7 +31,7 @@ Bitrix24 → raw sync → mapping/semantic layer → deterministic analytics →
 | Natural-language tools | DONE/PARTIAL | expand deterministic routing |
 | Bitrix entity URLs | MISSING | add URL builder |
 | Daily report | PARTIAL | align customer blocks |
-| Daily/weekly scheduler | MISSING | add configurable scheduler |
+| Daily/weekly scheduler | PARTIAL | Stage 4.6A executor + durable delivery; activation/HA review pending |
 | Deleted entity reconciliation | MISSING | add tombstone/reconciliation |
 | First response / SLA | BLOCKED_BY_BUSINESS_DECISION | approve event + rules |
 | КП staleness | BLOCKED_BY_BUSINESS_DECISION | approve КП event + limits |
