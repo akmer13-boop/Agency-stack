@@ -21,6 +21,13 @@ from app.services.bitrix24_sync import (
     run_incremental_bitrix_sync,
     run_initial_bitrix_sync,
 )
+from app.services.bitrix24_tombstone_activation import (
+    BitrixTombstoneActivationBlocked,
+    activate_bitrix_tombstones,
+    format_tombstone_activation_result,
+    format_tombstone_counts,
+    get_tombstone_counts,
+)
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
@@ -28,6 +35,7 @@ from app.telegram.messages import split_telegram_text
 router = Router(name="bitrix24-sync")
 SYNC_RUN_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER})
 SYNC_STATUS_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER})
+TOMBSTONE_ACTIVATION_ROLES = frozenset({UserRole.ADMIN})
 _sync_lock = asyncio.Lock()
 
 
@@ -170,6 +178,108 @@ async def bitrix_reconciliation_status_handler(
     await _send_long_text(
         message,
         format_bitrix_reconciliation_audit(audit),
+        settings,
+    )
+
+
+def _tombstone_activation_confirmed(message: Message) -> bool:
+    text = (message.text or "").strip()
+    parts = text.split(maxsplit=1)
+    return len(parts) == 2 and parts[1].strip().upper() == "CONFIRM"
+
+
+@router.message(Command("bitrix_tombstone_activate"))
+async def bitrix_tombstone_activate_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    user_id = _user_id(message)
+    if not is_telegram_user_allowed(user_id, settings):
+        await message.answer("Доступ к Agency Stack не предоставлен.")
+        return
+
+    role = await _sync_user(message, settings, conversation_store)
+    if role not in TOMBSTONE_ACTIVATION_ROLES:
+        await message.answer("Soft tombstone activation разрешена только администратору.")
+        return
+
+    if not _tombstone_activation_confirmed(message):
+        await message.answer(
+            "Команда ничего не изменила. Для явной активации используйте: "
+            "/bitrix_tombstone_activate CONFIRM"
+        )
+        return
+
+    if _sync_lock.locked():
+        await message.answer("Синхронизация или tombstone activation уже выполняется.")
+        return
+
+    await message.answer(
+        "Запускаю свежий полный read-only sync, затем повторно проверю каждый "
+        "absence candidate. Soft tombstones применятся только если ВСЕ "
+        "кандидаты подтверждены missing. Bitrix24 write не выполняется."
+    )
+
+    try:
+        async with _sync_lock:
+            async with ChatActionSender.typing(
+                bot=message.bot,
+                chat_id=message.chat.id,
+            ):
+                sync_result = await run_initial_bitrix_sync(settings)
+                audit = sync_result.reconciliation_audit
+                if audit is None:
+                    raise BitrixTombstoneActivationBlocked(
+                        "Fresh full sync did not produce reconciliation audit"
+                    )
+                result = await activate_bitrix_tombstones(
+                    settings,
+                    audit,
+                )
+    except BitrixTombstoneActivationBlocked as exc:
+        await message.answer(
+            "Soft tombstone activation ОСТАНОВЛЕНА fail-closed: "
+            f"{exc}. Ни один новый tombstone из этого batch не применён."
+        )
+        return
+    except (Bitrix24ConfigurationError, Bitrix24RequestError) as exc:
+        await message.answer(f"Soft tombstone activation остановлена: {exc}")
+        return
+    except Exception:
+        await message.answer(
+            "Soft tombstone activation остановлена из-за внутренней ошибки. "
+            "Проверьте локальные логи и tombstone status."
+        )
+        return
+
+    await _send_long_text(
+        message,
+        format_tombstone_activation_result(result),
+        settings,
+    )
+
+
+@router.message(Command("bitrix_tombstone_status"))
+async def bitrix_tombstone_status_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    user_id = _user_id(message)
+    if not is_telegram_user_allowed(user_id, settings):
+        await message.answer("Доступ к Agency Stack не предоставлен.")
+        return
+
+    role = await _sync_user(message, settings, conversation_store)
+    if role not in SYNC_STATUS_ROLES:
+        await message.answer("Tombstone status недоступен для вашей роли.")
+        return
+
+    counts = await get_tombstone_counts(settings)
+    await _send_long_text(
+        message,
+        format_tombstone_counts(counts),
         settings,
     )
 

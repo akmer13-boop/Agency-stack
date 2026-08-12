@@ -3,6 +3,7 @@
 from app.integrations.bitrix24.client import (
     BITRIX24_READ_ONLY_METHODS,
     Bitrix24ConfigurationError,
+    Bitrix24ProbeResult,
     Bitrix24ReadOnlyClient,
     Bitrix24ReadOnlyViolation,
     Bitrix24RequestError,
@@ -11,6 +12,7 @@ from app.integrations.bitrix24.client import (
 __all__ = [
     "BITRIX24_READ_ONLY_METHODS",
     "Bitrix24ConfigurationError",
+    "Bitrix24ProbeResult",
     "Bitrix24ReadOnlyClient",
     "Bitrix24ReadOnlyViolation",
     "Bitrix24RequestError",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,10 +19,15 @@ BITRIX24_READ_ONLY_METHODS: Final[frozenset[str]] = frozenset(
         "crm.category.list",
         "crm.status.list",
         "crm.deal.list",
+        "crm.deal.get",
         "crm.deal.fields",
         "crm.stagehistory.list",
         "crm.lead.list",
+        "crm.lead.get",
         "crm.lead.fields",
+        "crm.contact.get",
+        "crm.company.get",
+        "crm.activity.list",
     }
 )
 
@@ -69,6 +75,12 @@ DEPARTMENT_DIRECTORY_FIELDS: Final[tuple[str, ...]] = (
     "NAME",
     "PARENT",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class Bitrix24ProbeResult:
+    status_code: int
+    data: dict[str, Any]
 
 
 class Bitrix24ConfigurationError(ValueError):
@@ -147,6 +159,54 @@ class Bitrix24ReadOnlyClient:
                 f"Bitrix24 method is not permitted in read-only mode: {method}"
             )
         return f"{self._webhook_url}{method}.json"
+
+    async def probe(
+        self,
+        method: str,
+        params: Mapping[str, Any] | None = None,
+    ) -> Bitrix24ProbeResult:
+        endpoint = self._endpoint(method)
+        payload = dict(params or {})
+        if "auth" in payload:
+            raise Bitrix24ReadOnlyViolation("Auth tokens must not be passed in request payloads")
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._timeout,
+                verify=self._verify_ssl,
+                follow_redirects=False,
+                proxy=self._proxy_url,
+                transport=self._transport,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "User-Agent": "Agency-Stack/0.4",
+                },
+            ) as client:
+                response = await client.post(endpoint, json=payload)
+        except httpx.TimeoutException as exc:
+            raise Bitrix24RequestError("Bitrix24 request timed out") from exc
+        except httpx.RequestError as exc:
+            raise Bitrix24RequestError("Unable to connect to Bitrix24") from exc
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise Bitrix24RequestError(
+                "Bitrix24 returned invalid JSON",
+                error_code=f"HTTP_{response.status_code}",
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise Bitrix24RequestError(
+                "Bitrix24 returned an unexpected response",
+                error_code=f"HTTP_{response.status_code}",
+            )
+
+        return Bitrix24ProbeResult(
+            status_code=response.status_code,
+            data=data,
+        )
 
     async def call(
         self,
@@ -275,11 +335,7 @@ class Bitrix24ReadOnlyClient:
             max_items=max_items,
         )
         return [
-            {
-                key: item.get(key)
-                for key in USER_DIRECTORY_FIELDS
-                if key in item
-            }
+            {key: item.get(key) for key in USER_DIRECTORY_FIELDS if key in item}
             for item in raw_users
             if item.get("ID") is not None
         ]
@@ -290,11 +346,7 @@ class Bitrix24ReadOnlyClient:
         if not isinstance(result, list):
             raise Bitrix24RequestError("Bitrix24 returned an invalid department list")
         return [
-            {
-                key: item.get(key)
-                for key in DEPARTMENT_DIRECTORY_FIELDS
-                if key in item
-            }
+            {key: item.get(key) for key in DEPARTMENT_DIRECTORY_FIELDS if key in item}
             for item in result
             if isinstance(item, dict) and item.get("ID") is not None
         ]
