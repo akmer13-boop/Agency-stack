@@ -110,7 +110,7 @@ async def _load_activity_payloads(database_path: str, deal_id: str) -> list[dict
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = 'activity'
               AND CAST(json_extract(payload_json, '$.OWNER_ID') AS TEXT) = ?
               AND CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = 2
@@ -187,12 +187,8 @@ async def build_recent_deal_activity(
         ),
         last_activity_type=last_activity.activity_type if last_activity else None,
         last_activity_at=last_activity.event_at if last_activity else None,
-        last_communication_type=(
-            last_communication.activity_type if last_communication else None
-        ),
-        last_communication_at=(
-            last_communication.event_at if last_communication else None
-        ),
+        last_communication_type=(last_communication.activity_type if last_communication else None),
+        last_communication_at=(last_communication.event_at if last_communication else None),
         next_open_activity_exists=report.next_open_activity is not None,
     )
 
@@ -231,10 +227,8 @@ def format_recent_deal_activity(
         f"• Завершённых: {activity.completed_count}",
         f"• Незавершённых в окне: {activity.open_count}",
         f"• По типам: {_counts_text(activity.activity_type_counts)}",
-        "• Подтверждённых коммуникаций: "
-        f"{activity.completed_communications_count}",
-        "• Коммуникации по типам: "
-        f"{_counts_text(activity.communication_type_counts)}",
+        f"• Подтверждённых коммуникаций: {activity.completed_communications_count}",
+        f"• Коммуникации по типам: {_counts_text(activity.communication_type_counts)}",
     ]
 
     if activity.last_activity_at is None:
@@ -280,10 +274,8 @@ def format_recent_deal_activity_for_ai(
         f"Completed in window: {activity.completed_count}",
         f"Open in window: {activity.open_count}",
         f"Activity types: {_counts_text(activity.activity_type_counts)}",
-        "Completed communications in window: "
-        f"{activity.completed_communications_count}",
-        "Communication types: "
-        f"{_counts_text(activity.communication_type_counts)}",
+        f"Completed communications in window: {activity.completed_communications_count}",
+        f"Communication types: {_counts_text(activity.communication_type_counts)}",
         "Last activity in window: "
         f"{activity.last_activity_type or 'none'}; "
         f"{_format_dt(activity.last_activity_at, timezone_name)}",

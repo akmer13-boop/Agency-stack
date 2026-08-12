@@ -100,7 +100,7 @@ async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str,
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = ?
             ORDER BY CAST(entity_id AS INTEGER)
             """,
@@ -126,7 +126,7 @@ async def _load_lead_activities(database_path: str) -> list[dict[str, Any]]:
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = 'activity'
               AND CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = 1
             ORDER BY CAST(entity_id AS INTEGER)

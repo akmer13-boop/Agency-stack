@@ -102,7 +102,7 @@ async def _load_activity_payloads(database_path: str, deal_id: str) -> list[dict
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = 'activity'
               AND CAST(json_extract(payload_json, '$.OWNER_ID') AS TEXT) = ?
               AND CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = 2
@@ -125,9 +125,7 @@ async def _load_activity_payloads(database_path: str, deal_id: str) -> list[dict
 
 def _stage_entered_at(report: DealDrilldown) -> datetime | None:
     current_stage_events = [
-        item.occurred_at
-        for item in report.stage_history
-        if item.stage_id == report.stage_id
+        item.occurred_at for item in report.stage_history if item.stage_id == report.stage_id
     ]
     if current_stage_events:
         return max(current_stage_events)
@@ -185,9 +183,7 @@ async def build_deal_stage_evidence(
         )
 
     type_counts = Counter(item.activity_type for item in activities)
-    activity_type_counts = tuple(
-        sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))
-    )
+    activity_type_counts = tuple(sorted(type_counts.items(), key=lambda item: (-item[1], item[0])))
 
     last_activity = max(activities, key=lambda item: item.event_at) if activities else None
     communications = [
@@ -214,12 +210,8 @@ async def build_deal_stage_evidence(
             reference,
             last_activity.event_at if last_activity else None,
         ),
-        last_communication_type=(
-            last_communication.activity_type if last_communication else None
-        ),
-        last_communication_at=(
-            last_communication.event_at if last_communication else None
-        ),
+        last_communication_type=(last_communication.activity_type if last_communication else None),
+        last_communication_at=(last_communication.event_at if last_communication else None),
         days_since_last_communication=_days_since(
             reference,
             last_communication.event_at if last_communication else None,
@@ -244,9 +236,7 @@ def _format_dt(value: datetime | None, timezone_name: str) -> str:
 def _type_counts_text(evidence: DealStageEvidence) -> str:
     if not evidence.activity_type_counts:
         return "нет датированных активностей"
-    return ", ".join(
-        f"{label} {count}" for label, count in evidence.activity_type_counts
-    )
+    return ", ".join(f"{label} {count}" for label, count in evidence.activity_type_counts)
 
 
 def _evidence_signals(report: DealDrilldown, evidence: DealStageEvidence) -> list[str]:
@@ -258,8 +248,7 @@ def _evidence_signals(report: DealDrilldown, evidence: DealStageEvidence) -> lis
         )
     elif evidence.activities_after_stage == 0:
         signals.append(
-            "После входа на текущую стадию в локальном срезе нет датированных "
-            "CRM-активностей."
+            "После входа на текущую стадию в локальном срезе нет датированных CRM-активностей."
         )
     else:
         signals.append(
@@ -316,9 +305,7 @@ def format_deal_stage_evidence(
             f"{evidence.last_activity_type} · "
             f"{_format_dt(evidence.last_activity_at, timezone_name)} · {state}"
         )
-        lines.append(
-            f"• Дней с последней активности: {evidence.days_since_last_activity}"
-        )
+        lines.append(f"• Дней с последней активности: {evidence.days_since_last_activity}")
 
     if evidence.last_communication_at is None:
         lines.append("• Последняя завершённая коммуникация после входа: не найдена")
@@ -329,8 +316,7 @@ def format_deal_stage_evidence(
             f"{_format_dt(evidence.last_communication_at, timezone_name)}"
         )
         lines.append(
-            "• Дней с последней завершённой коммуникации: "
-            f"{evidence.days_since_last_communication}"
+            f"• Дней с последней завершённой коммуникации: {evidence.days_since_last_communication}"
         )
 
     lines.append(

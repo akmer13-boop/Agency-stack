@@ -145,7 +145,7 @@ async def _load_deals(database_path: str) -> list[dict[str, Any]]:
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = 'deal'
             ORDER BY CAST(entity_id AS INTEGER)
             """
@@ -363,8 +363,7 @@ def format_loss_report(report: LossReport, *, limit: int = 15) -> str:
     ]
     for item in report.reasons[:limit]:
         lines.append(
-            f"• {category_label(item.category_id)} · "
-            f"{stage_label(item.stage_id)}: {item.count}"
+            f"• {category_label(item.category_id)} · {stage_label(item.stage_id)}: {item.count}"
         )
 
     if report.by_category:
@@ -378,8 +377,7 @@ def format_loss_report(report: LossReport, *, limit: int = 15) -> str:
             lines.append(f"• ID {manager_id}: {count}")
 
     lines.append(
-        "\nЭто фактическая финальная стадия проигрыша в CRM, а не причина, "
-        "выведенная моделью."
+        "\nЭто фактическая финальная стадия проигрыша в CRM, а не причина, выведенная моделью."
     )
     return "\n".join(lines)
 
@@ -430,8 +428,7 @@ def format_manager_report(
         lines.append(line)
         if item.month_won_amounts:
             amounts = ", ".join(
-                f"{currency} {_money(amount)}"
-                for currency, amount in item.month_won_amounts
+                f"{currency} {_money(amount)}" for currency, amount in item.month_won_amounts
             )
             lines.append(f"  сумма WON: {amounts}")
 

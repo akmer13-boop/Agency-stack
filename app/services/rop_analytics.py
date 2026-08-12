@@ -157,7 +157,7 @@ async def _load_raw_entities(database_path: str, entity_type: str) -> list[dict[
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = ?
             ORDER BY CAST(entity_id AS INTEGER)
             """,
@@ -218,9 +218,7 @@ def _build_period_kpi(
             lost += 1
 
     closed = won + lost
-    conversion = (
-        Decimal(won) / Decimal(closed) * Decimal("100") if closed else Decimal("0")
-    )
+    conversion = Decimal(won) / Decimal(closed) * Decimal("100") if closed else Decimal("0")
     return PeriodKpi(
         key=key,
         label=label,
@@ -348,9 +346,7 @@ async def build_rop_snapshot(
             )
 
     closed = won + lost
-    conversion = (
-        Decimal(won) / Decimal(closed) * Decimal("100") if closed else Decimal("0")
-    )
+    conversion = Decimal(won) / Decimal(closed) * Decimal("100") if closed else Decimal("0")
 
     currencies = tuple(
         CurrencyKpi(
