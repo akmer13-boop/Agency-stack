@@ -21,12 +21,13 @@ from app.semantic.normalizer import (
     normalize_stage_event,
     normalize_user,
 )
+from app.storage.crm_store import CrmStore
 
 T = TypeVar("T")
 
 
 class SemanticRepository:
-    """Read-only semantic projection over crm_raw_entities."""
+    """Read-only semantic projection over crm_active_entities."""
 
     def __init__(self, database_path: str) -> None:
         self.database_path = database_path
@@ -38,9 +39,10 @@ class SemanticRepository:
         *,
         limit: int | None = None,
     ) -> list[T]:
+        await CrmStore(self.database_path).initialize()
         query = """
             SELECT entity_id, payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = ?
             ORDER BY entity_id
         """

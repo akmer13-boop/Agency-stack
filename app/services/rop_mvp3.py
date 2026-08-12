@@ -192,7 +192,7 @@ async def _load_entities(database_path: str, entity_type: str) -> list[dict[str,
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = ?
             ORDER BY CAST(entity_id AS INTEGER)
             """,
@@ -376,11 +376,7 @@ async def build_cycle_time_report(
             if not starts:
                 continue
             start_at = starts[0]
-            targets = [
-                at
-                for at, stage_id in events
-                if stage_id == target_stage and at >= start_at
-            ]
+            targets = [at for at, stage_id in events if stage_id == target_stage and at >= start_at]
             if targets:
                 hours = max(0.0, (targets[0] - start_at).total_seconds() / 3600)
                 completed_hours.append(hours)
@@ -401,9 +397,7 @@ async def build_cycle_time_report(
                     start_stage_id=start_stage,
                     target_stage_id=target_stage,
                     completed_count=len(completed_hours),
-                    median_hours=(
-                        float(median(completed_hours)) if completed_hours else None
-                    ),
+                    median_hours=(float(median(completed_hours)) if completed_hours else None),
                     over_72h_count=over_72h,
                     active_pending_over_72h=pending_over_72h,
                 )

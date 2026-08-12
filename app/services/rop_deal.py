@@ -203,7 +203,7 @@ async def _load_payload_by_id(
         cursor = await database.execute(
             """
             SELECT payload_json
-            FROM crm_raw_entities
+            FROM crm_active_entities
             WHERE entity_type = ? AND entity_id = ?
             LIMIT 1
             """,
@@ -234,13 +234,11 @@ async def _load_related_payloads(
     ]
     params: list[Any] = [entity_type, owner_id]
     if owner_type_id is not None:
-        clauses.append(
-            "CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = ?"
-        )
+        clauses.append("CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = ?")
         params.append(owner_type_id)
 
     query = (
-        "SELECT payload_json FROM crm_raw_entities WHERE "
+        "SELECT payload_json FROM crm_active_entities WHERE "
         + " AND ".join(clauses)
         + " ORDER BY CAST(entity_id AS INTEGER)"
     )
@@ -359,11 +357,7 @@ async def build_deal_drilldown(
     )
     activities = [_to_activity(item) for item in activities_payload]
 
-    completed = [
-        item
-        for item in activities
-        if item.completed and item.event_at is not None
-    ]
+    completed = [item for item in activities if item.completed and item.event_at is not None]
     last_completed = (
         max(
             completed,
@@ -412,9 +406,7 @@ async def build_deal_drilldown(
     timeline_error: str | None = None
     if include_timeline_comments and settings.bitrix24_configured:
         try:
-            raw_comments = await build_deal_detail_client(
-                settings
-            ).list_deal_timeline_comments(
+            raw_comments = await build_deal_detail_client(settings).list_deal_timeline_comments(
                 normalized_id,
                 max_items=5,
             )
@@ -486,10 +478,7 @@ def _sla_text(report: DealDrilldown) -> str:
         return f"КРИТИЧНО · {report.sla_rule_label or 'stage-specific SLA'}"
     if report.sla_severity == "attention":
         return f"ВНИМАНИЕ · {report.sla_rule_label or 'stage-specific SLA'}"
-    return (
-        "активного SLA-сигнала нет: стадия вне измеряемых правил "
-        "или ниже порога внимания"
-    )
+    return "активного SLA-сигнала нет: стадия вне измеряемых правил или ниже порога внимания"
 
 
 def _format_activity(
@@ -524,28 +513,21 @@ def _action_items(report: DealDrilldown, reference: datetime) -> list[str]:
     if report.sla_severity == "critical":
         actions.append("Разобрать с ответственным причину выхода за stage-specific SLA.")
     elif report.sla_severity == "attention":
-        actions.append(
-            "Проверить следующий шаг до перехода карточки в критическую зону SLA."
-        )
+        actions.append("Проверить следующий шаг до перехода карточки в критическую зону SLA.")
 
     next_activity = report.next_open_activity
     if next_activity is None:
-        actions.append(
-            "В локальном срезе нет незавершённой активности — назначить следующий шаг."
-        )
+        actions.append("В локальном срезе нет незавершённой активности — назначить следующий шаг.")
     elif next_activity.deadline is not None and next_activity.deadline < reference:
         overdue_days = max(
             0,
             int((reference - next_activity.deadline).total_seconds() // 86400),
         )
-        actions.append(
-            f"Разобрать просроченную активность: просрочка {overdue_days} дн."
-        )
+        actions.append(f"Разобрать просроченную активность: просрочка {overdue_days} дн.")
 
     if report.activities_count == 0:
         actions.append(
-            "Проверить ведение карточки: связанных CRM-активностей "
-            "в локальном срезе нет."
+            "Проверить ведение карточки: связанных CRM-активностей в локальном срезе нет."
         )
     return actions[:3]
 
@@ -557,9 +539,7 @@ def format_deal_drilldown(
     now: datetime | None = None,
 ) -> str:
     reference = (now or datetime.now(UTC)).astimezone(UTC)
-    category_stage = (
-        f"{category_label(report.category_id)} · {stage_label(report.stage_id)}"
-    )
+    category_stage = f"{category_label(report.category_id)} · {stage_label(report.stage_id)}"
     stage_age = report.stage_age_days if report.stage_age_days is not None else "—"
     lines = [
         f"ИИ-РОП · сделка #{report.deal_id}",
@@ -600,8 +580,7 @@ def format_deal_drilldown(
     else:
         for event in report.stage_history[-8:]:
             event_line = (
-                f"• {_format_dt(event.occurred_at, timezone_name)} · "
-                f"{stage_label(event.stage_id)}"
+                f"• {_format_dt(event.occurred_at, timezone_name)} · {stage_label(event.stage_id)}"
             )
             lines.append(event_line)
 
@@ -642,9 +621,7 @@ def format_deal_for_ai(
 ) -> str:
     """Compact facts for the LLM without raw comment or activity-description text."""
 
-    category_stage = (
-        f"{category_label(report.category_id)} · {stage_label(report.stage_id)}"
-    )
+    category_stage = f"{category_label(report.category_id)} · {stage_label(report.stage_id)}"
     stage_age = report.stage_age_days if report.stage_age_days is not None else "—"
     lines = [
         f"ИИ-РОП · compact deal facts #{report.deal_id}",
@@ -674,16 +651,13 @@ def format_deal_for_ai(
         else:
             next_time = "срок не указан"
         lines.append(
-            "Ближайшая незавершённая активность: "
-            f"{next_activity.activity_type}; {next_time}"
+            f"Ближайшая незавершённая активность: {next_activity.activity_type}; {next_time}"
         )
     else:
         lines.append("Ближайшая незавершённая активность: не найдена")
 
     if report.stage_history:
-        path = " → ".join(
-            stage_label(item.stage_id) for item in report.stage_history[-6:]
-        )
+        path = " → ".join(stage_label(item.stage_id) for item in report.stage_history[-6:])
         lines.append(f"Последние стадии: {path}")
 
     lines.append(
