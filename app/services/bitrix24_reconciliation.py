@@ -248,7 +248,8 @@ def format_bitrix_reconciliation_audit(
 
     lines = [
         "Bitrix24 · Deleted Entity Reconciliation Audit",
-        "Режим: DRY RUN — локальные сущности НЕ удаляются и НЕ скрываются.",
+        "Режим: DRY RUN — raw CRM сущности НЕ удаляются; сам "
+        "reconciliation не применяет и не снимает tombstones.",
         f"Run: #{audit.run_id}",
         f"Статус: {audit.status.value}",
         f"Authoritative: {'да' if audit.authoritative else 'нет'}",
@@ -268,8 +269,10 @@ def format_bitrix_reconciliation_audit(
             "",
             "Absence candidate означает только: ID есть в локальной SQLite, "
             "но отсутствовал в завершённом полном обходе Bitrix24.",
-            "Это ещё НЕ доказательство удаления: автоматические tombstones "
-            "на этом этапе запрещены.",
+            "Absence candidate сам по себе — НЕ доказательство удаления. "
+            "Сам audit не меняет analytics visibility; soft tombstone может быть "
+            "применён только отдельной fail-closed activation после повторной "
+            "read-only проверки кандидата.",
             "Incremental sync и full sync с лимитом не считаются authoritative для reconciliation.",
         ]
     )

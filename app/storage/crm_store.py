@@ -284,6 +284,23 @@ class CrmStore:
                     """,
                     rows,
                 )
+
+                for entity_type, entity_id, *_rest in rows:
+                    cursor = await database.execute(
+                        """
+                        SELECT 1
+                        FROM crm_active_entities
+                        WHERE entity_type = ? AND entity_id = ?
+                        LIMIT 1
+                        """,
+                        (entity_type, entity_id),
+                    )
+                    if await cursor.fetchone() is not None:
+                        raise RuntimeError(
+                            "Soft tombstone did not hide active CRM entity: "
+                            f"{entity_type}:{entity_id}"
+                        )
+
                 await database.commit()
             except Exception:
                 await database.rollback()
@@ -362,6 +379,47 @@ class CrmStore:
             )
             rows = await cursor.fetchall()
         return {str(row[0]): int(row[1]) for row in rows}
+
+    async def count_active_by_type(self) -> dict[str, int]:
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            cursor = await database.execute(
+                """
+                SELECT entity_type, COUNT(*)
+                FROM crm_active_entities
+                GROUP BY entity_type
+                ORDER BY entity_type
+                """
+            )
+            rows = await cursor.fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    async def find_active_entity_id(
+        self,
+        entity_type: str,
+        *,
+        excluded_ids: set[str] | None = None,
+    ) -> str | None:
+        excluded = excluded_ids or set()
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            cursor = await database.execute(
+                """
+                SELECT entity_id
+                FROM crm_active_entities
+                WHERE entity_type = ?
+                ORDER BY CAST(entity_id AS INTEGER) DESC, entity_id DESC
+                LIMIT 200
+                """,
+                (entity_type,),
+            )
+            rows = await cursor.fetchall()
+
+        for row in rows:
+            entity_id = str(row[0])
+            if entity_id not in excluded:
+                return entity_id
+        return None
 
     async def get_last_completed_run_started_at(self) -> str | None:
         async with aiosqlite.connect(self.database_path) as database:

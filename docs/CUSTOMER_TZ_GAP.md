@@ -32,7 +32,7 @@ Bitrix24 → raw sync → mapping/semantic layer → deterministic analytics →
 | Bitrix entity URLs | MISSING | add URL builder |
 | Daily report | PARTIAL | align customer blocks |
 | Daily/weekly scheduler | PARTIAL | Stage 4.6A executor + Stage 4.6B health; activation/HA review pending |
-| Deleted entity reconciliation | PARTIAL | Stage 4.7A evidence + Stage 4.7B1 reversible tombstone foundation; live activation pending |
+| Deleted entity reconciliation | PARTIAL | Stage 4.7A evidence + Stage 4.7B1 foundation + Stage 4.7B2 guarded admin activation; live activation pending post-merge |
 | First response / SLA | BLOCKED_BY_BUSINESS_DECISION | approve event + rules |
 | КП staleness | BLOCKED_BY_BUSINESS_DECISION | approve КП event + limits |
 | Conversion | PARTIAL | approve source→target definitions |
