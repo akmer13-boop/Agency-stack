@@ -42,6 +42,10 @@ from app.services.rop_first_response_policy import (
     format_first_response_policy_for_ai,
 )
 from app.services.rop_leads import build_lead_intelligence, format_lead_intelligence_for_ai
+from app.services.rop_management_facts import (
+    build_management_facts,
+    format_management_facts_for_ai,
+)
 from app.services.rop_mvp3 import (
     build_cycle_time_report,
     build_focus_report,
@@ -318,6 +322,26 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_first_response_policy_for_ai(policy)
 
     @function_tool
+    async def get_rop_management_facts(
+        manager_id: int | None = None,
+    ) -> str:
+        """Return deterministic current CRM facts for the team or one responsible ID.
+
+        Use this for objective manager/team workload, current assigned deal/lead states,
+        sales CRM activity counts and WON CRM OPPORTUNITY. It never calculates a manager
+        rating, First Response SLA compliance, stale verdict, business conversion KPI,
+        plan/fact or escalation verdict.
+
+        Args:
+            manager_id: Optional numeric Bitrix24 responsible user ID.
+        """
+        snapshot = await build_management_facts(settings.database_path)
+        return format_management_facts_for_ai(
+            snapshot,
+            manager_id=str(manager_id) if manager_id is not None else None,
+        )
+
+    @function_tool
     async def get_rop_weekend_leads() -> str:
         """Return exact lead cohort and manager processing facts for the weekend.
 
@@ -346,5 +370,6 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_lead_response_evidence,
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
+        get_rop_management_facts,
         get_rop_weekend_leads,
     ]

@@ -33,6 +33,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_lead_response_evidence",
         "get_rop_lead_response_trend",
         "get_rop_first_response_policy",
+        "get_rop_management_facts",
         "get_rop_weekend_leads",
     }
 
@@ -57,6 +58,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_lead_response_evidence" in names
     assert "get_rop_lead_response_trend" in names
     assert "get_rop_first_response_policy" in names
+    assert "get_rop_management_facts" in names
     assert "get_rop_weekend_leads" in names
 
 
@@ -134,3 +136,13 @@ def test_employee_agent_does_not_receive_rop_tools() -> None:
     settings = Settings(_env_file=None)
     agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.EMPLOYEE, settings)
     assert not agent.tools
+
+
+def test_manager_agent_routes_objective_manager_facts_to_policy_free_tool() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "используй get_rop_management_facts" in agent.instructions
+    assert "policy-free fact layer" in agent.instructions
+    assert "pending_business_approval" in agent.instructions
+    assert "не рассчитывай его самостоятельно" in agent.instructions
