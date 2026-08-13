@@ -37,6 +37,7 @@ from app.services.rop_deep_analytics import (
     format_stage_aging_report,
 )
 from app.services.rop_directory import enrich_responsible_ids, load_rop_directory
+from app.services.rop_fact_quality import build_fact_quality_report, format_fact_quality_for_ai
 from app.services.rop_first_response_policy import (
     build_first_response_policy,
     format_first_response_policy_for_ai,
@@ -322,6 +323,17 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_first_response_policy_for_ai(policy)
 
     @function_tool
+    async def get_rop_fact_quality() -> str:
+        """Return descriptive source-data coverage for future management metrics.
+
+        Use this tool for questions about CRM data completeness, missing source evidence,
+        stage-history coverage, manager directory mapping or whether data exists to support
+        a future KPI. It does not apply a good/bad threshold and does not repair data.
+        """
+        report = await build_fact_quality_report(settings.database_path)
+        return format_fact_quality_for_ai(report)
+
+    @function_tool
     async def get_rop_management_facts(
         manager_id: int | None = None,
     ) -> str:
@@ -370,6 +382,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_lead_response_evidence,
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
+        get_rop_fact_quality,
         get_rop_management_facts,
         get_rop_weekend_leads,
     ]
