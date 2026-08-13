@@ -33,6 +33,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_lead_response_evidence",
         "get_rop_lead_response_trend",
         "get_rop_first_response_policy",
+        "get_rop_fact_quality",
         "get_rop_management_facts",
         "get_rop_weekend_leads",
     }
@@ -58,6 +59,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_lead_response_evidence" in names
     assert "get_rop_lead_response_trend" in names
     assert "get_rop_first_response_policy" in names
+    assert "get_rop_fact_quality" in names
     assert "get_rop_management_facts" in names
     assert "get_rop_weekend_leads" in names
 
@@ -146,3 +148,12 @@ def test_manager_agent_routes_objective_manager_facts_to_policy_free_tool() -> N
     assert "policy-free fact layer" in agent.instructions
     assert "pending_business_approval" in agent.instructions
     assert "не рассчитывай его самостоятельно" in agent.instructions
+
+
+def test_manager_agent_routes_data_coverage_questions_to_quality_tool() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "используй get_rop_fact_quality" in agent.instructions
+    assert "не придумывай минимальный допустимый процент" in agent.instructions
+    assert "различай наличие исходных данных" in agent.instructions
