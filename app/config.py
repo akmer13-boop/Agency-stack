@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     app_name: str = "Agency Stack"
-    app_version: str = "0.4.27"
+    app_version: str = "0.4.28"
 
     openai_api_key: str = Field(default="", repr=False)
     openai_model: str = "gpt-5-mini"
@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     rop_first_response_clock: str = ""
     rop_first_response_reassignment_mode: str = ""
     rop_first_response_threshold_seconds: int = Field(default=0, ge=0, le=604_800)
+    rop_business_policy_path: str = "config/rop-business-policies.json"
     rop_scheduler_enabled: bool = False
     rop_scheduler_daily_enabled: bool = False
     rop_scheduler_daily_time: str = ""

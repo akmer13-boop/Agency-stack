@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "policies": {
+    "first_response_sla": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of timer, event, clock, reassignment and threshold."
+    },
+    "stale_deal": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of inactivity window and relevant activity."
+    },
+    "proposal_stale": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of proposal-sent event and follow-up window."
+    },
+    "business_conversion": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of source cohort, target event and attribution."
+    },
+    "manager_rating": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of metrics, weights, normalization and exclusions."
+    },
+    "sales_plan_fact": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of plan source, period, ownership and financial measure."
+    },
+    "management_escalation": {
+      "approval_status": "pending",
+      "approved_by": "",
+      "approved_at": "",
+      "parameters": {},
+      "note": "Awaiting business approval of mandatory intervention conditions."
+    }
+  }
+}
