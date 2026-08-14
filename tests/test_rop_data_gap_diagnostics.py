@@ -132,15 +132,15 @@ async def test_data_gap_diagnostics_returns_exact_active_ids(tmp_path) -> None:
     assert gaps["deal.stage_history_owner_match"].entity_ids == ("11",)
     assert gaps["lead.stage_history_owner_match"].entity_ids == ("21",)
     assert gaps["sales_activity.observed_timestamp"].entity_ids == ("31",)
-    assert gaps["observed_manager_id.directory_mapping"].entity_ids == ("2",)
+    assert gaps["observed_actor_id.resolution"].entity_ids == ("2",)
 
-    assert len(report.unmapped_managers) == 1
-    manager = report.unmapped_managers[0]
-    assert manager.user_id == "2"
-    assert manager.deal_references == 1
-    assert manager.lead_references == 1
-    assert manager.activity_references == 1
-    assert manager.total_references == 3
+    assert len(report.unresolved_actors) == 1
+    actor = report.unresolved_actors[0]
+    assert actor.actor_id == "2"
+    assert actor.deal_references == 1
+    assert actor.lead_references == 1
+    assert actor.activity_references == 1
+    assert actor.total_references == 3
 
     assert "12" not in {entity_id for gap in report.gaps for entity_id in gap.entity_ids}
 
@@ -155,5 +155,5 @@ async def test_data_gap_formatter_is_diagnostic_only(tmp_path) -> None:
 
     assert "EXACT CURRENT DATA GAPS" in text
     assert "Do not infer the business importance" in text
-    assert "Do not call an unmapped user deleted" in text
+    assert "Do not call an unresolved actor deleted" in text
     assert "no crm write" in text.lower()

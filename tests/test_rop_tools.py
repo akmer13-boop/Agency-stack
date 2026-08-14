@@ -34,6 +34,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_lead_response_trend",
         "get_rop_first_response_policy",
         "get_rop_business_policy_status",
+        "get_rop_actor_resolution",
         "get_rop_data_gap_diagnostics",
         "get_rop_fact_quality",
         "get_rop_management_facts",
@@ -62,6 +63,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_lead_response_trend" in names
     assert "get_rop_first_response_policy" in names
     assert "get_rop_business_policy_status" in names
+    assert "get_rop_actor_resolution" in names
     assert "get_rop_data_gap_diagnostics" in names
     assert "get_rop_fact_quality" in names
     assert "get_rop_management_facts" in names
@@ -181,6 +183,8 @@ def test_manager_agent_routes_exact_gap_questions_to_diagnostics() -> None:
         settings,
     )
     assert isinstance(agent.instructions, str)
+    assert "используй get_rop_actor_resolution" in agent.instructions
+    assert "special_actor_candidate" in agent.instructions
+    assert "unresolved_actor" in agent.instructions
     assert "используй get_rop_data_gap_diagnostics" in agent.instructions
-    assert "Не называй отсутствующий в справочнике" in agent.instructions
     assert "не обещай автоматическое исправление CRM" in agent.instructions

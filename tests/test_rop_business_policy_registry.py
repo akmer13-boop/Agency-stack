@@ -100,8 +100,8 @@ async def test_approved_business_status_does_not_activate_rule(
             deal_count=1,
             lead_count=1,
             sales_activity_count=1,
-            manager_ids_observed=1,
-            manager_ids_mapped=1,
+            actor_ids_observed=1,
+            actor_ids_resolved=1,
             coverages=tuple(
                 CoverageFact(key=key, covered=1, total=1) for key in sorted(dependencies)
             ),
@@ -145,14 +145,14 @@ async def test_registry_reports_data_gap_without_quality_verdict(
             deal_count=1,
             lead_count=10,
             sales_activity_count=10,
-            manager_ids_observed=5,
-            manager_ids_mapped=4,
+            actor_ids_observed=5,
+            actor_ids_resolved=4,
             coverages=(
                 CoverageFact("lead.created_at", 10, 10),
                 CoverageFact("sales_activity.responsible_user_id", 10, 10),
                 CoverageFact("sales_activity.observed_timestamp", 10, 10),
                 CoverageFact(
-                    "observed_manager_id.directory_mapping",
+                    "observed_actor_id.resolution",
                     4,
                     5,
                 ),
@@ -178,7 +178,7 @@ async def test_registry_reports_data_gap_without_quality_verdict(
     first = next(item for item in snapshot.policies if item.key == "first_response_sla")
     text = format_business_policy_registry_for_ai(snapshot)
 
-    assert first.data_gaps[0].key == "observed_manager_id.directory_mapping"
+    assert first.data_gaps[0].key == "observed_actor_id.resolution"
     assert first.data_gaps[0].missing == 1
     assert "business approval is NOT technical activation" in text
     assert "acceptance threshold" in text
