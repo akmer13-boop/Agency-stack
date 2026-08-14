@@ -19,6 +19,10 @@ from app.services.rop_analytics import (
     format_rop_today,
     format_rop_week,
 )
+from app.services.rop_business_policy_registry import (
+    build_business_policy_registry,
+    format_business_policy_registry_for_ai,
+)
 from app.services.rop_deal import build_deal_drilldown, format_deal_for_ai
 from app.services.rop_deal_evidence import (
     build_deal_stage_evidence,
@@ -323,6 +327,18 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_first_response_policy_for_ai(policy)
 
     @function_tool
+    async def get_rop_business_policy_status() -> str:
+        """Return approval, binding and data-prerequisite status for business rules.
+
+        Use this when the user asks which management rules are approved,
+        pending, rejected, configured or technically activated. Approval
+        alone never activates a rule and this tool never calculates the
+        resulting KPI or verdict.
+        """
+        snapshot = await build_business_policy_registry(settings)
+        return format_business_policy_registry_for_ai(snapshot)
+
+    @function_tool
     async def get_rop_fact_quality() -> str:
         """Return descriptive source-data coverage for future management metrics.
 
@@ -382,6 +398,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_lead_response_evidence,
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
+        get_rop_business_policy_status,
         get_rop_fact_quality,
         get_rop_management_facts,
         get_rop_weekend_leads,
