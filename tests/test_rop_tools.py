@@ -34,6 +34,7 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_lead_response_trend",
         "get_rop_first_response_policy",
         "get_rop_business_policy_status",
+        "get_rop_data_gap_diagnostics",
         "get_rop_fact_quality",
         "get_rop_management_facts",
         "get_rop_weekend_leads",
@@ -61,6 +62,7 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_lead_response_trend" in names
     assert "get_rop_first_response_policy" in names
     assert "get_rop_business_policy_status" in names
+    assert "get_rop_data_gap_diagnostics" in names
     assert "get_rop_fact_quality" in names
     assert "get_rop_management_facts" in names
     assert "get_rop_weekend_leads" in names
@@ -169,3 +171,16 @@ def test_manager_agent_routes_business_policy_questions_to_registry() -> None:
     assert "approved означает только решение" in agent.instructions
     assert "operational=yes" in agent.instructions
     assert "configuration READY" in agent.instructions
+
+
+def test_manager_agent_routes_exact_gap_questions_to_diagnostics() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(
+        AgentRoute.SALES_MANAGER,
+        UserRole.MANAGER,
+        settings,
+    )
+    assert isinstance(agent.instructions, str)
+    assert "используй get_rop_data_gap_diagnostics" in agent.instructions
+    assert "Не называй отсутствующий в справочнике" in agent.instructions
+    assert "не обещай автоматическое исправление CRM" in agent.instructions

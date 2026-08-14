@@ -23,6 +23,10 @@ from app.services.rop_business_policy_registry import (
     build_business_policy_registry,
     format_business_policy_registry_for_ai,
 )
+from app.services.rop_data_gap_diagnostics import (
+    build_data_gap_diagnostics,
+    format_data_gap_diagnostics_for_ai,
+)
 from app.services.rop_deal import build_deal_drilldown, format_deal_for_ai
 from app.services.rop_deal_evidence import (
     build_deal_stage_evidence,
@@ -339,6 +343,17 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_business_policy_registry_for_ai(snapshot)
 
     @function_tool
+    async def get_rop_data_gap_diagnostics() -> str:
+        """Return exact local IDs behind current CRM data gaps.
+
+        Use this when the user asks which exact leads, deals, activities or
+        responsible IDs are behind a coverage gap. The output contains IDs
+        and impact counts only, not client contacts or free-text content.
+        """
+        report = await build_data_gap_diagnostics(settings.database_path)
+        return format_data_gap_diagnostics_for_ai(report)
+
+    @function_tool
     async def get_rop_fact_quality() -> str:
         """Return descriptive source-data coverage for future management metrics.
 
@@ -399,6 +414,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
         get_rop_business_policy_status,
+        get_rop_data_gap_diagnostics,
         get_rop_fact_quality,
         get_rop_management_facts,
         get_rop_weekend_leads,
