@@ -9,6 +9,10 @@ from app.services.rop_activity_risk import (
     build_activity_aware_risk,
     format_activity_aware_risk_for_ai,
 )
+from app.services.rop_actor_resolution import (
+    build_actor_resolution_report,
+    format_actor_resolution_for_ai,
+)
 from app.services.rop_analytics import (
     RopSnapshot,
     build_rop_snapshot,
@@ -343,6 +347,23 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_business_policy_registry_for_ai(snapshot)
 
     @function_tool
+    async def get_rop_actor_resolution(actor_id: int | None = None) -> str:
+        """Resolve whether an observed responsible/assigned ID is a directory user,
+        conservative special-actor candidate, or unresolved actor.
+
+        Use this before treating an unknown responsible ID as a human manager,
+        bot, system account, deleted employee or integration identity.
+
+        Args:
+            actor_id: Optional numeric Bitrix24 actor ID.
+        """
+        report = await build_actor_resolution_report(settings.database_path)
+        return format_actor_resolution_for_ai(
+            report,
+            actor_id=str(actor_id) if actor_id is not None else None,
+        )
+
+    @function_tool
     async def get_rop_data_gap_diagnostics() -> str:
         """Return exact local IDs behind current CRM data gaps.
 
@@ -358,7 +379,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         """Return descriptive source-data coverage for future management metrics.
 
         Use this tool for questions about CRM data completeness, missing source evidence,
-        stage-history coverage, manager directory mapping or whether data exists to support
+        stage-history coverage, responsible-actor resolution or whether data exists to support
         a future KPI. It does not apply a good/bad threshold and does not repair data.
         """
         report = await build_fact_quality_report(settings.database_path)
@@ -370,7 +391,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
     ) -> str:
         """Return deterministic current CRM facts for the team or one responsible ID.
 
-        Use this for objective manager/team workload, current assigned deal/lead states,
+        Use this for objective responsible-actor/team workload, current assigned deal/lead states,
         sales CRM activity counts and WON CRM OPPORTUNITY. It never calculates a manager
         rating, First Response SLA compliance, stale verdict, business conversion KPI,
         plan/fact or escalation verdict.
@@ -414,6 +435,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
         get_rop_business_policy_status,
+        get_rop_actor_resolution,
         get_rop_data_gap_diagnostics,
         get_rop_fact_quality,
         get_rop_management_facts,

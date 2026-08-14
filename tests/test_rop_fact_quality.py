@@ -121,8 +121,8 @@ async def test_fact_quality_uses_active_entities_and_measures_coverage(tmp_path)
     assert report.deal_count == 2
     assert report.lead_count == 2
     assert report.sales_activity_count == 2
-    assert report.manager_ids_observed == 2
-    assert report.manager_ids_mapped == 1
+    assert report.actor_ids_observed == 2
+    assert report.actor_ids_resolved == 1
     assert coverage["deal.created_at"].covered == 1
     assert coverage["deal.created_at"].total == 2
     assert coverage["deal.stage_history_owner_match"].covered == 1
@@ -130,7 +130,7 @@ async def test_fact_quality_uses_active_entities_and_measures_coverage(tmp_path)
     assert coverage["lead.stage_history_owner_match"].covered == 1
     assert coverage["sales_activity.responsible_user_id"].covered == 1
     assert coverage["sales_activity.observed_timestamp"].covered == 1
-    assert coverage["observed_manager_id.directory_mapping"].covered == 1
+    assert coverage["observed_actor_id.resolution"].covered == 1
 
 
 @pytest.mark.asyncio

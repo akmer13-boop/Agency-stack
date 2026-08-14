@@ -11,6 +11,10 @@ from app.semantic.activity_classifier import (
 )
 from app.semantic.models import SemanticDeal, SemanticLead
 from app.semantic.repository import SemanticRepository
+from app.services.rop_actor_resolution import (
+    ActorKind,
+    build_actor_resolution_report,
+)
 from app.services.rop_directory import load_rop_directory
 
 _LEAD_OWNER_TYPE_ID = "1"
@@ -35,6 +39,8 @@ class StageCountFact:
 @dataclass(frozen=True, slots=True)
 class ManagerFact:
     manager_id: str
+    actor_kind: str
+    technical_signals: tuple[str, ...]
     display_name: str
     employee_active: bool | None
     department_names: tuple[str, ...]
@@ -194,6 +200,11 @@ async def build_management_facts(
     deal_history = await repository.deal_stage_history()
     lead_history = await repository.lead_stage_history()
     directory = await load_rop_directory(database_path)
+    actor_report = await build_actor_resolution_report(
+        database_path,
+        now=reference,
+    )
+    actor_by_id = {item.actor_id: item for item in actor_report.actors}
 
     manager_counts: defaultdict[str, Counter[str]] = defaultdict(Counter)
     manager_amounts: defaultdict[
@@ -255,9 +266,16 @@ async def build_management_facts(
     managers: list[ManagerFact] = []
     for manager_id in sorted(manager_ids, key=_manager_sort_key):
         identity = directory.users.get(manager_id)
+        resolution = actor_by_id.get(manager_id)
         managers.append(
             ManagerFact(
                 manager_id=manager_id,
+                actor_kind=(
+                    resolution.kind.value
+                    if resolution is not None
+                    else ActorKind.UNRESOLVED_ACTOR.value
+                ),
+                technical_signals=(resolution.technical_signals if resolution is not None else ()),
                 display_name=(
                     identity.display_name if identity is not None else f"ID {manager_id}"
                 ),
@@ -313,6 +331,11 @@ def _money(value: Decimal) -> str:
     return f"{value.quantize(Decimal('0.01')):,.2f}".replace(",", " ")
 
 
+def _actor_meta(item: ManagerFact) -> str:
+    signals = ", ".join(item.technical_signals)
+    return item.actor_kind if not signals else f"{item.actor_kind}: {signals}"
+
+
 def _manager_label(item: ManagerFact) -> str:
     department = " / ".join(item.department_names)
     name = f"{item.display_name} · {department}" if department else item.display_name
@@ -362,7 +385,8 @@ def format_management_facts_for_ai(
 
     for item in selected[:manager_limit]:
         lines.append(
-            f"• {_manager_label(item)} | deals active/WON/LOST "
+            f"• {_manager_label(item)} [{_actor_meta(item)}] | "
+            f"deals active/WON/LOST "
             f"{item.current_active_deals}/{item.current_won_deals}/"
             f"{item.current_lost_deals} | leads active/success/failed "
             f"{item.current_active_leads}/{item.current_success_leads}/"
@@ -397,6 +421,10 @@ def format_management_facts_for_ai(
                 "• no First Response SLA compliance, stale/proposal verdict, manager "
                 "score/rating, business conversion, plan/fact or escalation verdict "
                 "is calculated;"
+            ),
+            (
+                "• a responsible actor is not automatically a confirmed human manager; "
+                "use Actor Resolution before identity-based conclusions;"
             ),
             (
                 "• do not infer manager quality from these counts without an approved "

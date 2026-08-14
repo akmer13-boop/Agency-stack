@@ -35,7 +35,7 @@ _POLICY_COVERAGE_DEPENDENCIES = {
         "lead.created_at",
         "sales_activity.responsible_user_id",
         "sales_activity.observed_timestamp",
-        "observed_manager_id.directory_mapping",
+        "observed_actor_id.resolution",
     ),
     "stale_deal": (
         "deal.updated_at",
@@ -59,19 +59,19 @@ _POLICY_COVERAGE_DEPENDENCIES = {
         "deal.assigned_user_id",
         "lead.assigned_user_id",
         "sales_activity.responsible_user_id",
-        "observed_manager_id.directory_mapping",
+        "observed_actor_id.resolution",
     ),
     "sales_plan_fact": (
         "deal.assigned_user_id",
         "deal.stage_semantic",
         "deal.currency",
-        "observed_manager_id.directory_mapping",
+        "observed_actor_id.resolution",
     ),
     "management_escalation": (
         "deal.assigned_user_id",
         "deal.stage_id",
         "sales_activity.observed_timestamp",
-        "observed_manager_id.directory_mapping",
+        "observed_actor_id.resolution",
     ),
 }
 
