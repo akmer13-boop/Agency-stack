@@ -20,6 +20,13 @@ async def test_deep_analytics_use_real_final_stages_and_movement(tmp_path: Path)
     database_path = str(tmp_path / "agency.db")
     store = CrmStore(database_path)
     await store.initialize()
+    await store.upsert_entities(
+        "user",
+        [
+            {"ID": "10", "NAME": "Иван", "LAST_NAME": "Петров", "ACTIVE": True},
+            {"ID": "11", "NAME": "Анна", "LAST_NAME": "Смирнова", "ACTIVE": True},
+        ],
+    )
     deals = [
         {
             "ID": "1",
@@ -116,3 +123,73 @@ async def test_deep_analytics_use_real_final_stages_and_movement(tmp_path: Path)
     assert "ID 10" in manager_text
     assert "общий aging" in manager_text
     assert "ФИО пока не подставляются" not in manager_text
+
+
+@pytest.mark.asyncio
+async def test_deep_analytics_excludes_non_directory_human_attribution(tmp_path: Path) -> None:
+    database_path = str(tmp_path / "human_deep.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+    await store.upsert_entities(
+        "user",
+        [{"ID": "10", "NAME": "Иван", "LAST_NAME": "Петров", "ACTIVE": True}],
+    )
+    now = datetime(2026, 8, 7, 14, 0, tzinfo=UTC)
+    await store.upsert_entities(
+        "deal",
+        [
+            {
+                "ID": "1",
+                "CATEGORY_ID": "7",
+                "STAGE_ID": "C7:UC_O89RHD",
+                "STAGE_SEMANTIC_ID": "F",
+                "ASSIGNED_BY_ID": "10",
+                "MOVED_TIME": "2026-08-05T10:00:00+00:00",
+                "DATE_MODIFY": "2026-08-05T10:00:00+00:00",
+            },
+            {
+                "ID": "2",
+                "CATEGORY_ID": "7",
+                "STAGE_ID": "C7:UC_O89RHD",
+                "STAGE_SEMANTIC_ID": "F",
+                "ASSIGNED_BY_ID": "7912",
+                "MOVED_TIME": "2026-08-05T10:00:00+00:00",
+                "DATE_MODIFY": "2026-08-05T10:00:00+00:00",
+            },
+            {
+                "ID": "3",
+                "CATEGORY_ID": "7",
+                "STAGE_ID": "C7:EXECUTING",
+                "STAGE_SEMANTIC_ID": "P",
+                "ASSIGNED_BY_ID": "10",
+                "MOVED_TIME": "2026-08-01T10:00:00+00:00",
+                "DATE_MODIFY": "2026-08-01T10:00:00+00:00",
+            },
+            {
+                "ID": "4",
+                "CATEGORY_ID": "7",
+                "STAGE_ID": "C7:EXECUTING",
+                "STAGE_SEMANTIC_ID": "P",
+                "ASSIGNED_BY_ID": "7912",
+                "MOVED_TIME": "2026-08-01T10:00:00+00:00",
+                "DATE_MODIFY": "2026-08-01T10:00:00+00:00",
+            },
+        ],
+        modified_field="DATE_MODIFY",
+    )
+
+    losses = await build_loss_report(database_path, now=now, timezone_name="UTC")
+    assert losses.total_lost == 2
+    assert dict(losses.by_manager) == {"10": 1}
+    assert dict(losses.excluded_by_manager) == {"7912": 1}
+
+    managers = await build_manager_report(database_path, now=now, timezone_name="UTC")
+    assert [item.assigned_by_id for item in managers.managers] == ["10"]
+    assert [item.assigned_by_id for item in managers.excluded_attribution] == ["7912"]
+    assert sum(item.active_count for item in managers.managers + managers.excluded_attribution) == 2
+
+    loss_text = format_loss_report(losses)
+    manager_text = format_manager_report(managers)
+    assert "Исключённая атрибуция" in loss_text
+    assert "actor ID 7912" in loss_text
+    assert "actor ID 7912" in manager_text

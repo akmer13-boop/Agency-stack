@@ -77,6 +77,7 @@ class ManagementFactSnapshot:
     lead_status_counts: tuple[StageCountFact, ...]
     activity_classification_counts: tuple[tuple[str, int], ...]
     managers: tuple[ManagerFact, ...]
+    excluded_actors: tuple[ManagerFact, ...]
     pending_business_rules: tuple[BusinessRuleGap, ...]
 
 
@@ -264,42 +265,41 @@ async def build_management_facts(
             manager_counts[manager_id]["manager_evidence"] += 1
 
     managers: list[ManagerFact] = []
+    excluded_actors: list[ManagerFact] = []
     for manager_id in sorted(manager_ids, key=_manager_sort_key):
         identity = directory.users.get(manager_id)
         resolution = actor_by_id.get(manager_id)
-        managers.append(
-            ManagerFact(
-                manager_id=manager_id,
-                actor_kind=(
-                    resolution.kind.value
-                    if resolution is not None
-                    else ActorKind.UNRESOLVED_ACTOR.value
-                ),
-                technical_signals=(resolution.technical_signals if resolution is not None else ()),
-                display_name=(
-                    identity.display_name if identity is not None else f"ID {manager_id}"
-                ),
-                employee_active=identity.active if identity is not None else None,
-                department_names=(identity.department_names if identity is not None else ()),
-                current_active_deals=_count(manager_counts, manager_id, "deal_active"),
-                current_won_deals=_count(manager_counts, manager_id, "deal_won"),
-                current_lost_deals=_count(manager_counts, manager_id, "deal_lost"),
-                current_active_leads=_count(manager_counts, manager_id, "lead_active"),
-                current_success_leads=_count(manager_counts, manager_id, "lead_success"),
-                current_failed_leads=_count(manager_counts, manager_id, "lead_failed"),
-                won_crm_opportunity_by_currency=tuple(sorted(manager_amounts[manager_id].items())),
-                sales_activities_total=_count(manager_counts, manager_id, "activity_total"),
-                sales_activities_completed=_count(manager_counts, manager_id, "activity_completed"),
-                sales_activities_open=_count(manager_counts, manager_id, "activity_open"),
-                confirmed_communications=_count(
-                    manager_counts, manager_id, "confirmed_communication"
-                ),
-                manager_evidence_activities=_count(manager_counts, manager_id, "manager_evidence"),
-                human_actions=_count(manager_counts, manager_id, "human_action"),
-                system_activities=_count(manager_counts, manager_id, "system_activity"),
-                unknown_activities=_count(manager_counts, manager_id, "unknown_activity"),
-            )
+        fact = ManagerFact(
+            manager_id=manager_id,
+            actor_kind=(
+                resolution.kind.value
+                if resolution is not None
+                else ActorKind.UNRESOLVED_ACTOR.value
+            ),
+            technical_signals=(resolution.technical_signals if resolution is not None else ()),
+            display_name=(identity.display_name if identity is not None else f"ID {manager_id}"),
+            employee_active=identity.active if identity is not None else None,
+            department_names=(identity.department_names if identity is not None else ()),
+            current_active_deals=_count(manager_counts, manager_id, "deal_active"),
+            current_won_deals=_count(manager_counts, manager_id, "deal_won"),
+            current_lost_deals=_count(manager_counts, manager_id, "deal_lost"),
+            current_active_leads=_count(manager_counts, manager_id, "lead_active"),
+            current_success_leads=_count(manager_counts, manager_id, "lead_success"),
+            current_failed_leads=_count(manager_counts, manager_id, "lead_failed"),
+            won_crm_opportunity_by_currency=tuple(sorted(manager_amounts[manager_id].items())),
+            sales_activities_total=_count(manager_counts, manager_id, "activity_total"),
+            sales_activities_completed=_count(manager_counts, manager_id, "activity_completed"),
+            sales_activities_open=_count(manager_counts, manager_id, "activity_open"),
+            confirmed_communications=_count(manager_counts, manager_id, "confirmed_communication"),
+            manager_evidence_activities=_count(manager_counts, manager_id, "manager_evidence"),
+            human_actions=_count(manager_counts, manager_id, "human_action"),
+            system_activities=_count(manager_counts, manager_id, "system_activity"),
+            unknown_activities=_count(manager_counts, manager_id, "unknown_activity"),
         )
+        if fact.actor_kind == ActorKind.DIRECTORY_USER.value:
+            managers.append(fact)
+        else:
+            excluded_actors.append(fact)
 
     return ManagementFactSnapshot(
         generated_at=reference,
@@ -323,6 +323,7 @@ async def build_management_facts(
             )
         ),
         managers=tuple(managers),
+        excluded_actors=tuple(excluded_actors),
         pending_business_rules=_PENDING_BUSINESS_RULES,
     )
 
@@ -349,8 +350,12 @@ def format_management_facts_for_ai(
     manager_limit: int = 50,
 ) -> str:
     selected = list(snapshot.managers)
+    excluded_selected = list(snapshot.excluded_actors)
     if manager_id is not None:
         selected = [item for item in selected if item.manager_id == str(manager_id)]
+        excluded_selected = [
+            item for item in excluded_selected if item.manager_id == str(manager_id)
+        ]
 
     lines = [
         "ИИ-РОП · Deterministic Management Facts",
@@ -375,12 +380,17 @@ def format_management_facts_for_ai(
         )
         lines.append(f"• activity evidence classes: {classes}")
 
-    lines.extend(["", "RESPONSIBLE FACTS — NOT A RATING / NOT A RANKING:"])
+    lines.extend(
+        [
+            "",
+            "HUMAN MANAGER FACTS — DIRECTORY USERS ONLY — NOT A RATING / NOT A RANKING:",
+        ]
+    )
     if not selected:
         lines.append(
-            "• no responsible users observed in active sales facts"
+            "• no directory-user managers observed in active sales facts"
             if manager_id is None
-            else f"• no active sales facts found for responsible ID {manager_id}"
+            else f"• no human-manager facts found for responsible ID {manager_id}"
         )
 
     for item in selected[:manager_limit]:
@@ -395,6 +405,26 @@ def format_management_facts_for_ai(
             f"{item.sales_activities_open} | confirmed communications "
             f"{item.confirmed_communications} | manager evidence "
             f"{item.manager_evidence_activities}"
+        )
+        if item.won_crm_opportunity_by_currency:
+            amounts = ", ".join(
+                f"{currency} {_money(amount)}"
+                for currency, amount in item.won_crm_opportunity_by_currency
+            )
+            lines.append(f"  WON CRM OPPORTUNITY: {amounts}")
+
+    lines.extend(["", "NON-HUMAN / UNRESOLVED ATTRIBUTION — NOT MANAGERS:"])
+    if not excluded_selected:
+        lines.append("• none")
+    for item in excluded_selected[:manager_limit]:
+        lines.append(
+            f"• {_manager_label(item)} [{_actor_meta(item)}] | "
+            f"deals active/WON/LOST "
+            f"{item.current_active_deals}/{item.current_won_deals}/"
+            f"{item.current_lost_deals} | leads active/success/failed "
+            f"{item.current_active_leads}/{item.current_success_leads}/"
+            f"{item.current_failed_leads} | sales activities "
+            f"{item.sales_activities_total}"
         )
         if item.won_crm_opportunity_by_currency:
             amounts = ", ".join(
@@ -423,8 +453,9 @@ def format_management_facts_for_ai(
                 "is calculated;"
             ),
             (
-                "• a responsible actor is not automatically a confirmed human manager; "
-                "use Actor Resolution before identity-based conclusions;"
+                "• HUMAN MANAGER FACTS contains directory_user actors only; "
+                "special_actor_candidate and unresolved_actor are separated "
+                "into NOT MANAGERS attribution;"
             ),
             (
                 "• do not infer manager quality from these counts without an approved "

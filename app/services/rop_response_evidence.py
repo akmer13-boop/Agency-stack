@@ -9,6 +9,7 @@ from statistics import median
 from app.config import Settings
 from app.semantic.repository import SemanticRepository
 from app.semantic.response_evidence import build_response_evidence_contract
+from app.services.rop_directory import load_rop_directory
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +29,7 @@ class LeadResponseEvidenceReport:
     manager_timestamp_fallbacks: int
     communication_timestamp_fallbacks: int
     skipped_leads_without_created_at: int
+    excluded_non_directory_manager_evidence_leads: int = 0
 
 
 def _p90(values: list[float]) -> float | None:
@@ -74,12 +76,31 @@ async def build_lead_response_evidence_report(
     repository = SemanticRepository(settings.database_path)
     leads = await repository.leads()
     activities = await repository.activities()
+    directory = await load_rop_directory(settings.database_path)
 
+    baseline_contract = build_response_evidence_contract(
+        leads,
+        activities,
+        period_start=start_at,
+        observed_until=reference,
+    )
     contract = build_response_evidence_contract(
         leads,
         activities,
         period_start=start_at,
         observed_until=reference,
+        manager_actor_ids=frozenset(directory.users),
+    )
+    baseline_by_lead = {item.lead_id: item for item in baseline_contract.leads}
+    excluded_manager_leads = sum(
+        1
+        for item in contract.leads
+        if (
+            (baseline := baseline_by_lead.get(item.lead_id)) is not None
+            and baseline.first_manager_evidence_activity_id is not None
+            and baseline.first_manager_evidence_activity_id
+            != item.first_manager_evidence_activity_id
+        )
     )
 
     manager_delays = [
@@ -129,6 +150,7 @@ async def build_lead_response_evidence_report(
         manager_timestamp_fallbacks=manager_fallbacks,
         communication_timestamp_fallbacks=communication_fallbacks,
         skipped_leads_without_created_at=(contract.skipped_leads_without_created_at),
+        excluded_non_directory_manager_evidence_leads=excluded_manager_leads,
     )
 
 
@@ -175,6 +197,9 @@ def format_lead_response_evidence_for_ai(
         "• Fallback timestamps manager/communication: "
         f"{report.manager_timestamp_fallbacks}/"
         f"{report.communication_timestamp_fallbacks}",
+        "• Лидов, где earliest manager-side evidence был исключён/заменён "
+        "из-за non-directory actor: "
+        f"{report.excluded_non_directory_manager_evidence_leads}",
     ]
 
     if report.skipped_leads_without_created_at:
@@ -191,7 +216,10 @@ def format_lead_response_evidence_for_ai(
             "отсчёта; нормативное начало SLA заказчиком не утверждено;",
             "• elapsed считается в календарном времени; рабочие часы, праздники "
             "и выходные не вычитаются;",
-            "• manager-side evidence использует консервативную классификацию Stage 4.2;",
+            "• manager-side evidence использует консервативную классификацию Stage 4.2 "
+            "и засчитывается только для RESPONSIBLE_ID из DIRECTORY_USER;",
+            "• non-directory/special/unresolved actor может оставаться частью общей "
+            "confirmed communication, но не считается human manager-side evidence;",
             "• входящая коммуникация и meeting не приписываются менеджеру как "
             "manager-side evidence автоматически;",
             "• история смены ответственного здесь не восстанавливается, поэтому "

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import aiosqlite
 
 from app.services.rop_catalog import category_label, stage_label
+from app.services.rop_directory import load_rop_directory
 from app.storage.crm_store import CrmStore
 
 
@@ -51,6 +52,7 @@ class LossReport:
     reasons: tuple[LossReasonStat, ...]
     by_category: tuple[tuple[str, int], ...]
     by_manager: tuple[tuple[str, int], ...]
+    excluded_by_manager: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +64,7 @@ class StageAgingReport:
 @dataclass(frozen=True, slots=True)
 class ManagerReport:
     managers: tuple[ManagerStat, ...]
+    excluded_attribution: tuple[ManagerStat, ...] = ()
 
 
 def _text(value: Any, default: str = "—") -> str:
@@ -147,7 +150,6 @@ async def _load_deals(database_path: str) -> list[dict[str, Any]]:
             SELECT payload_json
             FROM crm_active_entities
             WHERE entity_type = 'deal'
-            ORDER BY CAST(entity_id AS INTEGER)
             """
         )
         rows = await cursor.fetchall()
@@ -176,6 +178,8 @@ async def build_loss_report(
     reason_counts: Counter[tuple[str, str]] = Counter()
     category_counts: Counter[str] = Counter()
     manager_counts: Counter[str] = Counter()
+    excluded_manager_counts: Counter[str] = Counter()
+    directory = await load_rop_directory(database_path)
 
     for deal in await _load_deals(database_path):
         if not _in_scope(
@@ -195,7 +199,10 @@ async def build_loss_report(
         manager_id = _text(deal.get("ASSIGNED_BY_ID"), "не назначен")
         reason_counts[(category_id, stage_id)] += 1
         category_counts[category_id] += 1
-        manager_counts[manager_id] += 1
+        if manager_id in directory.users:
+            manager_counts[manager_id] += 1
+        else:
+            excluded_manager_counts[manager_id] += 1
 
     reasons = tuple(
         LossReasonStat(category_id=category_id, stage_id=stage_id, count=count)
@@ -207,6 +214,7 @@ async def build_loss_report(
         reasons=reasons,
         by_category=tuple(category_counts.most_common()),
         by_manager=tuple(manager_counts.most_common()),
+        excluded_by_manager=tuple(excluded_manager_counts.most_common()),
     )
 
 
@@ -282,6 +290,7 @@ async def build_manager_report(
 ) -> ManagerReport:
     reference = (now or datetime.now(UTC)).astimezone(UTC)
     start = _month_start(reference, timezone_name)
+    directory = await load_rop_directory(database_path)
     counters: defaultdict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "active": 0,
@@ -325,9 +334,9 @@ async def build_manager_report(
         else:
             item["lost"] += 1
 
-    managers: list[ManagerStat] = []
+    all_stats: list[ManagerStat] = []
     for manager_id, item in counters.items():
-        managers.append(
+        all_stats.append(
             ManagerStat(
                 assigned_by_id=manager_id,
                 active_count=int(item["active"]),
@@ -339,16 +348,22 @@ async def build_manager_report(
             )
         )
 
-    managers.sort(
-        key=lambda item: (
+    def sort_key(item: ManagerStat) -> tuple[int, int, int, int]:
+        return (
             item.critical_count,
             item.attention_count,
             item.active_count,
             item.month_lost,
-        ),
-        reverse=True,
+        )
+
+    managers = [item for item in all_stats if item.assigned_by_id in directory.users]
+    excluded = [item for item in all_stats if item.assigned_by_id not in directory.users]
+    managers.sort(key=sort_key, reverse=True)
+    excluded.sort(key=sort_key, reverse=True)
+    return ManagerReport(
+        managers=tuple(managers),
+        excluded_attribution=tuple(excluded),
     )
-    return ManagerReport(managers=tuple(managers))
 
 
 def _money(value: Decimal) -> str:
@@ -372,9 +387,14 @@ def format_loss_report(report: LossReport, *, limit: int = 15) -> str:
             lines.append(f"• {category_label(category_id)}: {count}")
 
     if report.by_manager:
-        lines.append("\nПо ответственным ID:")
+        lines.append("\nПо менеджерам (DIRECTORY_USER):")
         for manager_id, count in report.by_manager[:10]:
             lines.append(f"• ID {manager_id}: {count}")
+
+    if report.excluded_by_manager:
+        lines.append("\nИсключённая атрибуция · НЕ менеджеры:")
+        for actor_id, count in report.excluded_by_manager[:10]:
+            lines.append(f"• actor ID {actor_id}: {count}")
 
     lines.append(
         "\nЭто фактическая финальная стадия проигрыша в CRM, а не причина, выведенная моделью."
@@ -439,6 +459,19 @@ def format_manager_report(
     lines.append(
         "3+/5+ — общий aging, а не подтверждённое SLA-нарушение конкретной стадии. "
         "Для stage-specific SLA используются /rop_sla, /rop_focus и /rop_daily."
+    )
+    if report.excluded_attribution:
+        lines.append("\nИсключённая атрибуция · НЕ менеджеры:")
+        for item in report.excluded_attribution[:limit]:
+            lines.append(
+                f"• actor ID {item.assigned_by_id} | активных {item.active_count} | "
+                f"3+ {item.attention_count} | 5+ {item.critical_count} | "
+                f"месяц WON {item.month_won} / LOST {item.month_lost}"
+            )
+
+    lines.append(
+        "Персональные manager-строки строятся только для DIRECTORY_USER; "
+        "special/unresolved/non-directory attribution вынесена отдельно без рейтинга."
     )
     lines.append(
         "При наличии локального справочника Bitrix24 ФИО и отделы подставляются вместо "

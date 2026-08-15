@@ -19,6 +19,10 @@ async def test_response_trend_compares_mature_calendar_weeks(
     database_path = str(tmp_path / "agency.db")
     store = CrmStore(database_path)
     await store.initialize()
+    await store.upsert_entities(
+        "user",
+        [{"ID": "10", "NAME": "Иван", "LAST_NAME": "Петров", "ACTIVE": True}],
+    )
 
     previous_start = datetime(2026, 7, 20, 0, 0, tzinfo=UTC)
     current_start = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)
@@ -38,6 +42,7 @@ async def test_response_trend_compares_mature_calendar_weeks(
                 "ID": "101",
                 "OWNER_TYPE_ID": 1,
                 "OWNER_ID": "1",
+                "RESPONSIBLE_ID": "10",
                 "TYPE_ID": 6,
                 "COMPLETED": "Y",
                 "END_TIME": (previous_start + timedelta(days=1, hours=4)).isoformat(),
@@ -55,6 +60,7 @@ async def test_response_trend_compares_mature_calendar_weeks(
                 "ID": "103",
                 "OWNER_TYPE_ID": 1,
                 "OWNER_ID": "2",
+                "RESPONSIBLE_ID": "10",
                 "TYPE_ID": 6,
                 "COMPLETED": "Y",
                 "END_TIME": (previous_start + timedelta(days=10)).isoformat(),
@@ -63,6 +69,7 @@ async def test_response_trend_compares_mature_calendar_weeks(
                 "ID": "201",
                 "OWNER_TYPE_ID": 1,
                 "OWNER_ID": "3",
+                "RESPONSIBLE_ID": "10",
                 "TYPE_ID": 6,
                 "COMPLETED": "Y",
                 "END_TIME": (current_start + timedelta(days=1, hours=1)).isoformat(),
@@ -71,6 +78,7 @@ async def test_response_trend_compares_mature_calendar_weeks(
                 "ID": "202",
                 "OWNER_TYPE_ID": 1,
                 "OWNER_ID": "4",
+                "RESPONSIBLE_ID": "10",
                 "TYPE_ID": 6,
                 "COMPLETED": "Y",
                 "END_TIME": (current_start + timedelta(days=2, hours=2)).isoformat(),
@@ -145,3 +153,68 @@ async def test_response_trend_rejects_invalid_week_count(tmp_path: Path) -> None
 
     with pytest.raises(ValueError, match="weeks must be from 2 to 12"):
         await build_response_evidence_trend(settings, weeks=1)
+
+
+@pytest.mark.asyncio
+async def test_response_trend_tracks_excluded_non_directory_manager_evidence(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    database_path = str(tmp_path / "trend_human.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+    await store.upsert_entities(
+        "user",
+        [{"ID": "10", "NAME": "Иван", "LAST_NAME": "Петров", "ACTIVE": True}],
+    )
+    previous_start = datetime(2026, 7, 20, 0, 0, tzinfo=UTC)
+    current_start = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)
+    await store.upsert_entities(
+        "lead",
+        [
+            {"ID": "1", "DATE_CREATE": (previous_start + timedelta(days=1)).isoformat()},
+            {"ID": "2", "DATE_CREATE": (current_start + timedelta(days=1)).isoformat()},
+        ],
+    )
+    await store.upsert_entities(
+        "activity",
+        [
+            {
+                "ID": "101",
+                "OWNER_TYPE_ID": 1,
+                "OWNER_ID": "1",
+                "RESPONSIBLE_ID": "7912",
+                "TYPE_ID": 6,
+                "COMPLETED": "Y",
+                "END_TIME": (previous_start + timedelta(days=1, minutes=5)).isoformat(),
+            },
+            {
+                "ID": "102",
+                "OWNER_TYPE_ID": 1,
+                "OWNER_ID": "1",
+                "RESPONSIBLE_ID": "10",
+                "TYPE_ID": 6,
+                "COMPLETED": "Y",
+                "END_TIME": (previous_start + timedelta(days=1, minutes=15)).isoformat(),
+            },
+            {
+                "ID": "201",
+                "OWNER_TYPE_ID": 1,
+                "OWNER_ID": "2",
+                "RESPONSIBLE_ID": "10",
+                "TYPE_ID": 6,
+                "COMPLETED": "Y",
+                "END_TIME": (current_start + timedelta(days=1, minutes=10)).isoformat(),
+            },
+        ],
+    )
+    settings = Settings(_env_file=None, database_path=database_path, rop_timezone="UTC")
+    report = await build_response_evidence_trend(
+        settings,
+        weeks=2,
+        now=now,
+        observation_horizon_days=7,
+    )
+    assert report.cohorts[0].excluded_non_directory_manager_evidence_leads == 1
+    assert report.cohorts[0].manager_median_seconds == 15 * 60
+    assert report.cohorts[1].manager_median_seconds == 10 * 60

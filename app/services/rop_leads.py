@@ -91,6 +91,7 @@ class LeadIntelligenceReport:
     human_actions: int = 0
     system_activities: int = 0
     unknown_activities: int = 0
+    excluded_attribution: tuple[LeadManagerStat, ...] = ()
 
 
 async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str, Any]]:
@@ -102,7 +103,6 @@ async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str,
             SELECT payload_json
             FROM crm_active_entities
             WHERE entity_type = ?
-            ORDER BY CAST(entity_id AS INTEGER)
             """,
             (entity_type,),
         )
@@ -129,7 +129,6 @@ async def _load_lead_activities(database_path: str) -> list[dict[str, Any]]:
             FROM crm_active_entities
             WHERE entity_type = 'activity'
               AND CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = 1
-            ORDER BY CAST(entity_id AS INTEGER)
             """
         )
         rows = await cursor.fetchall()
@@ -532,7 +531,8 @@ async def build_lead_intelligence(
         )
         for source_id, count in new_source_counts.most_common()
     )
-    managers = tuple(
+    directory = await load_rop_directory(settings.database_path)
+    manager_stats = tuple(
         sorted(
             (
                 LeadManagerStat(
@@ -549,6 +549,10 @@ async def build_lead_intelligence(
             key=_manager_sort_key,
             reverse=True,
         )
+    )
+    managers = tuple(item for item in manager_stats if item.assigned_by_id in directory.users)
+    excluded_attribution = tuple(
+        item for item in manager_stats if item.assigned_by_id not in directory.users
     )
 
     return LeadIntelligenceReport(
@@ -582,6 +586,7 @@ async def build_lead_intelligence(
         human_actions=human_actions,
         system_activities=system_activities,
         unknown_activities=unknown_activities,
+        excluded_attribution=excluded_attribution,
     )
 
 
@@ -608,6 +613,15 @@ def _manager_line(
 ) -> str:
     return (
         f"• {employee_label(directory, item.assigned_by_id)} | новых {item.new_leads} | "
+        f"активных сейчас {item.current_active} | финал S/F "
+        f"{item.successful_finalizations}/{item.failed_finalizations} | "
+        f"aging 3+ {item.attention_3d} / 5+ {item.critical_5d}"
+    )
+
+
+def _excluded_attribution_line(item: LeadManagerStat) -> str:
+    return (
+        f"• ID {item.assigned_by_id} | новых {item.new_leads} | "
         f"активных сейчас {item.current_active} | финал S/F "
         f"{item.successful_finalizations}/{item.failed_finalizations} | "
         f"aging 3+ {item.attention_3d} / 5+ {item.critical_5d}"
@@ -704,17 +718,15 @@ def format_lead_intelligence(
     if report.managers:
         lines.append("\nМенеджеры · текущая операционная картина:")
         lines.extend(_manager_line(item, directory) for item in report.managers[:manager_limit])
-        unresolved = sum(
-            1
-            for item in report.managers[:manager_limit]
-            if item.assigned_by_id not in directory.users and item.assigned_by_id != "не назначен"
+
+    if report.excluded_attribution:
+        lines.append("\nИсключённая атрибуция · НЕ менеджеры:")
+        lines.extend(
+            _excluded_attribution_line(item) for item in report.excluded_attribution[:manager_limit]
         )
-        if unresolved:
-            lines.append(
-                f"• Справочник сотрудников не разрешил {unresolved} из показанных "
-                "manager ID. Начиная с 0.4.13 обычный Bitrix sync обновляет directory "
-                "автоматически."
-            )
+        hidden = max(0, len(report.excluded_attribution) - manager_limit)
+        if hidden:
+            lines.append(f"• ещё исключённых actor ID: {hidden}")
 
     lines.extend(
         [
@@ -724,6 +736,10 @@ def format_lead_intelligence(
             "• если один лид несколько раз попал в финальный статус в окне, для итогового "
             "S/F берётся его последнее финальное событие;",
             "• доля успешных среди финализированных — не lead→deal cohort conversion;",
+            "• персональные manager-строки показываются только для ID, присутствующих "
+            "в синхронизированном Bitrix user directory (DIRECTORY_USER);",
+            "• special/unresolved/non-directory attribution не становится менеджером "
+            "и показывается отдельным техническим блоком без ФИО;",
             "• менеджер финализации определяется по текущему ASSIGNED_BY_ID лида, "
             "поскольку stage history не хранит исторического ответственного;",
             "• aging 3+/5+ — общий сигнал движения, не stage-specific SLA лида;",
@@ -776,6 +792,8 @@ def format_lead_intelligence_for_ai(
         "lead→deal conversion. Не называй менеджера худшим без явной метрики; "
         "формулируй, по какому показателю его профиль наиболее тревожный. "
         "Если history_schema не готова, не трактуй S/F=0 как бизнес-факт. "
+        "Персональные manager-строки относятся только к DIRECTORY_USER; блок исключённой "
+        "атрибуции не превращай в человеческих менеджеров и не ранжируй. "
         "Этот tool возвращает агрегаты, а не список lead ID: не обещай выгрузить список "
         "лидов, карточки или manager-specific export без отдельного доступного tool."
     )

@@ -95,6 +95,7 @@ def build_response_evidence_contract(
     *,
     period_start: datetime,
     observed_until: datetime,
+    manager_actor_ids: frozenset[str] | None = None,
 ) -> ResponseEvidenceContract:
     start = _aware_utc(period_start, field="period_start")
     end = _aware_utc(observed_until, field="observed_until")
@@ -151,7 +152,9 @@ def build_response_evidence_contract(
             considered += 1
             evidence = classify_activity(activity)
 
-            if evidence.is_manager_evidence:
+            if evidence.is_manager_evidence and (
+                manager_actor_ids is None or activity.responsible_user_id in manager_actor_ids
+            ):
                 manager_candidates.append((event_at, activity.id, timestamp_source))
 
             if evidence.classification is ActivityClassification.CONFIRMED_COMMUNICATION:

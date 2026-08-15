@@ -63,6 +63,7 @@ class WeekendLeadReport:
     completed_human_actions: int = 0
     system_activities: int = 0
     unknown_activities: int = 0
+    excluded_attribution: tuple[WeekendManagerStat, ...] = ()
 
 
 def _timezone(name: str) -> ZoneInfo:
@@ -145,7 +146,6 @@ async def _load_payloads(database_path: str, entity_type: str) -> list[dict[str,
             SELECT payload_json
             FROM crm_active_entities
             WHERE entity_type = ?
-            ORDER BY CAST(entity_id AS INTEGER)
             """,
             (entity_type,),
         )
@@ -172,7 +172,6 @@ async def _load_lead_activities(database_path: str) -> list[dict[str, Any]]:
             FROM crm_active_entities
             WHERE entity_type = 'activity'
               AND CAST(json_extract(payload_json, '$.OWNER_TYPE_ID') AS INTEGER) = 1
-            ORDER BY CAST(entity_id AS INTEGER)
             """
         )
         rows = await cursor.fetchall()
@@ -331,7 +330,8 @@ async def build_weekend_lead_report(
             first_communication_delays.append(delay)
             manager["delays"].append(delay)
 
-    managers = tuple(
+    directory = await load_rop_directory(settings.database_path)
+    manager_stats = tuple(
         sorted(
             (
                 WeekendManagerStat(
@@ -360,6 +360,10 @@ async def build_weekend_lead_report(
             reverse=True,
         )
     )
+    managers = tuple(item for item in manager_stats if item.assigned_by_id in directory.users)
+    excluded_attribution = tuple(
+        item for item in manager_stats if item.assigned_by_id not in directory.users
+    )
 
     return WeekendLeadReport(
         start_at=start_at,
@@ -383,6 +387,7 @@ async def build_weekend_lead_report(
         completed_human_actions=completed_human_actions,
         system_activities=system_activities,
         unknown_activities=unknown_activities,
+        excluded_attribution=excluded_attribution,
     )
 
 
@@ -430,6 +435,16 @@ def _manager_line(item: WeekendManagerStat, directory: RopDirectory) -> str:
     )
 
 
+def _excluded_attribution_line(item: WeekendManagerStat) -> str:
+    return (
+        f"• ID {item.assigned_by_id} | лидов {item.leads} | "
+        f"с CRM-активностью {item.leads_with_activity}/{item.leads} | "
+        f"с manager evidence {item.leads_with_manager_evidence}/{item.leads} | "
+        f"с коммуникацией {item.leads_with_communication}/{item.leads} | "
+        f"сейчас P/S/F {item.current_active}/{item.current_success}/{item.current_failed}"
+    )
+
+
 def format_weekend_lead_report(
     report: WeekendLeadReport,
     directory: RopDirectory,
@@ -470,11 +485,22 @@ def format_weekend_lead_report(
         lines.append("\nМенеджеры · обработка лидов этой weekend-когорты:")
         lines.extend(_manager_line(item, directory) for item in report.managers[:manager_limit])
 
+    if report.excluded_attribution:
+        lines.append("\nИсключённая атрибуция · НЕ менеджеры:")
+        lines.extend(
+            _excluded_attribution_line(item) for item in report.excluded_attribution[:manager_limit]
+        )
+        hidden = max(0, len(report.excluded_attribution) - manager_limit)
+        if hidden:
+            lines.append(f"• ещё исключённых actor ID: {hidden}")
+
     lines.extend(
         [
             "\nМетодология:",
             "• 'за выходные' = календарные суббота+воскресенье в ROP_TIMEZONE; "
             "если запрос сделан в сами выходные, окно заканчивается текущим моментом;",
+            "• персональные manager-строки показываются только для ID из синхронизированного "
+            "Bitrix user directory (DIRECTORY_USER); non-directory attribution вынесена отдельно;",
             "• менеджер = текущий ASSIGNED_BY_ID; это не доказывает, кто был ответственным "
             "в момент поступления лида, если ответственный позже менялся;",
             "• confirmed_communication = завершённая activity типа встреча, звонок или e-mail;",
