@@ -139,3 +139,48 @@ def test_response_contract_requires_timezone_aware_window() -> None:
         assert "timezone-aware" in str(exc)
     else:
         raise AssertionError("naive period_start must be rejected")
+
+
+def test_response_contract_filters_manager_evidence_by_directory_actor_scope() -> None:
+    created = datetime(2026, 8, 1, 10, 0, tzinfo=UTC)
+    lead = normalize_lead(
+        {
+            "ID": "1",
+            "ASSIGNED_BY_ID": "10",
+            "DATE_CREATE": created.isoformat(),
+            "STATUS_ID": "NEW",
+            "STATUS_SEMANTIC_ID": "P",
+        }
+    )
+    technical = normalize_activity(
+        {
+            "ID": "100",
+            "OWNER_TYPE_ID": 1,
+            "OWNER_ID": "1",
+            "RESPONSIBLE_ID": "7912",
+            "TYPE_ID": 6,
+            "COMPLETED": "Y",
+            "END_TIME": (created + timedelta(minutes=5)).isoformat(),
+        }
+    )
+    human = normalize_activity(
+        {
+            "ID": "101",
+            "OWNER_TYPE_ID": 1,
+            "OWNER_ID": "1",
+            "RESPONSIBLE_ID": "10",
+            "TYPE_ID": 6,
+            "COMPLETED": "Y",
+            "END_TIME": (created + timedelta(minutes=10)).isoformat(),
+        }
+    )
+
+    contract = build_response_evidence_contract(
+        [lead],
+        [technical, human],
+        period_start=datetime(2026, 8, 1, 0, 0, tzinfo=UTC),
+        observed_until=datetime(2026, 8, 2, 0, 0, tzinfo=UTC),
+        manager_actor_ids=frozenset({"10"}),
+    )
+    assert contract.leads[0].first_manager_evidence_activity_id == "101"
+    assert contract.leads[0].manager_evidence_elapsed_seconds == 600

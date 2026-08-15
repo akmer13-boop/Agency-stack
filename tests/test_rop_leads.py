@@ -263,3 +263,85 @@ async def test_lead_intelligence_marks_legacy_history_unreliable(tmp_path: Path)
     text = format_lead_intelligence(report, directory)
     assert "временно не считаются достоверными" in text
     assert "/bitrix_sync_incremental" in text
+
+
+@pytest.mark.asyncio
+async def test_lead_intelligence_excludes_non_directory_attribution_from_manager_rows(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    database_path = str(tmp_path / "human_scope_leads.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+
+    await store.upsert_entities(
+        "department",
+        [{"ID": "7", "NAME": "Продажи"}],
+    )
+    await store.upsert_entities(
+        "user",
+        [
+            {
+                "ID": "10",
+                "NAME": "Иван",
+                "LAST_NAME": "Петров",
+                "ACTIVE": True,
+                "UF_DEPARTMENT": [7],
+            }
+        ],
+    )
+    await store.upsert_entities(
+        "lead",
+        [
+            {
+                "ID": "1",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
+                "SOURCE_ID": "WEB",
+                "ASSIGNED_BY_ID": "10",
+                "DATE_CREATE": (now - timedelta(days=1)).isoformat(),
+                "DATE_MODIFY": (now - timedelta(hours=2)).isoformat(),
+            },
+            {
+                "ID": "2",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
+                "SOURCE_ID": "OPENLINE",
+                "ASSIGNED_BY_ID": "7912",
+                "DATE_CREATE": (now - timedelta(days=1)).isoformat(),
+                "DATE_MODIFY": (now - timedelta(hours=3)).isoformat(),
+            },
+            {
+                "ID": "3",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
+                "SOURCE_ID": "OTHER",
+                "ASSIGNED_BY_ID": "484",
+                "DATE_CREATE": (now - timedelta(days=1)).isoformat(),
+                "DATE_MODIFY": (now - timedelta(hours=4)).isoformat(),
+            },
+        ],
+        modified_field="DATE_MODIFY",
+    )
+
+    settings = Settings(_env_file=None, database_path=database_path)
+    report = await build_lead_intelligence(settings, 7, now=now)
+
+    assert report.total_leads == 3
+    assert report.new_leads == 3
+    assert report.current_active == 3
+
+    assert [item.assigned_by_id for item in report.managers] == ["10"]
+    excluded_ids = {item.assigned_by_id for item in report.excluded_attribution}
+    assert excluded_ids == {"484", "7912"}
+
+    combined = report.managers + report.excluded_attribution
+    assert sum(item.new_leads for item in combined) == report.new_leads
+    assert sum(item.current_active for item in combined) == report.current_active
+
+    directory = await load_rop_directory(database_path)
+    text = format_lead_intelligence(report, directory)
+    assert "Иван Петров · Продажи (ID 10)" in text
+    assert "Исключённая атрибуция · НЕ менеджеры:" in text
+    assert "ID 7912" in text
+    assert "ID 484" in text

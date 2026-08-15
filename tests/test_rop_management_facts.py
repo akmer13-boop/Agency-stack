@@ -263,3 +263,103 @@ async def test_management_fact_formatter_can_filter_responsible_id(tmp_path) -> 
 
     assert "(ID 2)" in text
     assert "(ID 1)" not in text
+
+
+@pytest.mark.asyncio
+async def test_management_facts_separate_non_directory_actors_from_human_managers(
+    tmp_path,
+) -> None:
+    database_path = str(tmp_path / "human_guard.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+
+    await store.upsert_entities(
+        "user",
+        [{"ID": "1", "NAME": "Анна", "ACTIVE": True}],
+    )
+    await store.upsert_entities(
+        "deal",
+        [
+            {
+                "ID": "10",
+                "ASSIGNED_BY_ID": "1",
+                "STAGE_ID": "C7:NEW",
+                "STAGE_SEMANTIC_ID": "P",
+            }
+        ],
+    )
+    await store.upsert_entities(
+        "lead",
+        [
+            {
+                "ID": "20",
+                "ASSIGNED_BY_ID": "7912",
+                "CREATED_BY_ID": "7912",
+                "SOURCE_ID": "5|WZ_TELEGRAM_TEST",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
+            },
+            {
+                "ID": "21",
+                "ASSIGNED_BY_ID": "484",
+                "STATUS_ID": "NEW",
+                "STATUS_SEMANTIC_ID": "P",
+            },
+        ],
+    )
+    await store.upsert_entities(
+        "activity",
+        [
+            {
+                "ID": "30",
+                "OWNER_TYPE_ID": "1",
+                "OWNER_ID": "20",
+                "RESPONSIBLE_ID": "7912",
+                "AUTHOR_ID": "7912",
+                "PROVIDER_ID": "IMOPENLINES_SESSION",
+                "TYPE_ID": "6",
+                "COMPLETED": "Y",
+                "CREATED": "2026-08-14T09:00:00Z",
+            },
+            {
+                "ID": "31",
+                "OWNER_TYPE_ID": "1",
+                "OWNER_ID": "21",
+                "RESPONSIBLE_ID": "484",
+                "AUTHOR_ID": "54",
+                "PROVIDER_ID": "VOXIMPLANT_CALL",
+                "TYPE_ID": "2",
+                "COMPLETED": "Y",
+                "CREATED": "2026-08-14T09:10:00Z",
+            },
+        ],
+    )
+
+    snapshot = await build_management_facts(
+        database_path,
+        now=datetime(2026, 8, 14, 10, 0, tzinfo=UTC),
+    )
+
+    assert snapshot.active_deals == 1
+    assert snapshot.active_leads == 2
+    assert snapshot.sales_activities_total == 2
+    assert {item.manager_id for item in snapshot.managers} == {"1"}
+
+    excluded = {item.manager_id: item for item in snapshot.excluded_actors}
+    assert set(excluded) == {"484", "7912"}
+    assert excluded["7912"].actor_kind == "special_actor_candidate"
+    assert excluded["484"].actor_kind == "unresolved_actor"
+    assert excluded["7912"].current_active_leads == 1
+    assert excluded["484"].current_active_leads == 1
+
+    text = format_management_facts_for_ai(snapshot)
+    human = text.split(
+        "HUMAN MANAGER FACTS — DIRECTORY USERS ONLY — NOT A RATING / NOT A RANKING:"
+    )[1].split("NON-HUMAN / UNRESOLVED ATTRIBUTION — NOT MANAGERS:")[0]
+    excluded_text = text.split("NON-HUMAN / UNRESOLVED ATTRIBUTION — NOT MANAGERS:")[1]
+
+    assert "(ID 1)" in human
+    assert "(ID 7912)" not in human
+    assert "(ID 484)" not in human
+    assert "(ID 7912)" in excluded_text
+    assert "(ID 484)" in excluded_text

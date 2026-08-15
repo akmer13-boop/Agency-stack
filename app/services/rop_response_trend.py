@@ -10,6 +10,7 @@ from app.config import Settings
 from app.semantic.models import SemanticLead
 from app.semantic.repository import SemanticRepository
 from app.semantic.response_evidence import build_response_evidence_contract
+from app.services.rop_directory import load_rop_directory
 
 _COHORT_DAYS = 7
 _DEFAULT_OBSERVATION_HORIZON_DAYS = 7
@@ -28,6 +29,7 @@ class ResponseEvidenceWeek:
     manager_p90_seconds: float | None
     communication_median_seconds: float | None
     communication_p90_seconds: float | None
+    excluded_non_directory_manager_evidence_leads: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +136,7 @@ def _week_from_contract(
     start_at: datetime,
     end_at: datetime,
     contract,
+    baseline_contract,
     horizon_seconds: float,
 ) -> ResponseEvidenceWeek:
     manager_delays = [
@@ -148,6 +151,17 @@ def _week_from_contract(
         if item.confirmed_communication_elapsed_seconds is not None
         and item.confirmed_communication_elapsed_seconds <= horizon_seconds
     ]
+    baseline_by_lead = {item.lead_id: item for item in baseline_contract.leads}
+    excluded_manager_leads = sum(
+        1
+        for item in contract.leads
+        if (
+            (baseline := baseline_by_lead.get(item.lead_id)) is not None
+            and baseline.first_manager_evidence_activity_id is not None
+            and baseline.first_manager_evidence_activity_id
+            != item.first_manager_evidence_activity_id
+        )
+    )
 
     total = contract.cohort_size
     return ResponseEvidenceWeek(
@@ -162,6 +176,7 @@ def _week_from_contract(
         manager_p90_seconds=_p90(manager_delays),
         communication_median_seconds=_median(communication_delays),
         communication_p90_seconds=_p90(communication_delays),
+        excluded_non_directory_manager_evidence_leads=excluded_manager_leads,
     )
 
 
@@ -230,6 +245,8 @@ async def build_response_evidence_trend(
     repository = SemanticRepository(settings.database_path)
     leads = await repository.leads()
     activities = await repository.activities()
+    directory = await load_rop_directory(settings.database_path)
+    manager_actor_ids = frozenset(directory.users)
 
     horizon_seconds = float(observation_horizon_days * 24 * 60 * 60)
     cohorts: list[ResponseEvidenceWeek] = []
@@ -246,11 +263,18 @@ async def build_response_evidence_trend(
             end_at=end_at,
         )
 
+        baseline_contract = build_response_evidence_contract(
+            selected_leads,
+            activities,
+            period_start=start_at,
+            observed_until=reference,
+        )
         contract = build_response_evidence_contract(
             selected_leads,
             activities,
             period_start=start_at,
             observed_until=reference,
+            manager_actor_ids=manager_actor_ids,
         )
 
         cohorts.append(
@@ -258,6 +282,7 @@ async def build_response_evidence_trend(
                 start_at=start_at,
                 end_at=end_at,
                 contract=contract,
+                baseline_contract=baseline_contract,
                 horizon_seconds=horizon_seconds,
             )
         )
@@ -330,7 +355,9 @@ def format_response_evidence_trend_for_ai(
             f"{_coverage(item.communication_coverage_percent)} | "
             "communication median "
             f"{_duration(item.communication_median_seconds)} | "
-            f"communication p90 {_duration(item.communication_p90_seconds)}"
+            f"communication p90 {_duration(item.communication_p90_seconds)} | "
+            "excluded non-directory manager evidence leads "
+            f"{item.excluded_non_directory_manager_evidence_leads}"
         )
 
     delta = report.latest_vs_previous
@@ -373,6 +400,8 @@ def format_response_evidence_trend_for_ai(
             "• faster/slower и higher/lower — только описательные направления изменения;",
             "• статистическая значимость и причинность не оцениваются;",
             "• это observed CRM evidence, а не First Response SLA;",
+            "• manager-side evidence засчитывается только для RESPONSIBLE_ID из "
+            "DIRECTORY_USER; confirmed communication остаётся когортным CRM-фактом;",
             "• business-hours, holidays и historical reassignment не применяются;",
             "• отчёт не используется как рейтинг менеджеров.",
         ]

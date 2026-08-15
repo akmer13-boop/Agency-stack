@@ -180,3 +180,74 @@ async def test_weekend_lead_report_uses_calendar_weekend_and_manager_evidence(
     assert "1 ч 30 мин" in text
     assert "а не first-response SLA" in text
     assert "SECRET WEEKEND" not in text
+
+
+@pytest.mark.asyncio
+async def test_weekend_report_excludes_non_directory_attribution_from_manager_rows(
+    tmp_path: Path,
+) -> None:
+    now = datetime(2026, 8, 10, 10, 30, tzinfo=UTC)
+    database_path = str(tmp_path / "human_scope_weekend.db")
+    store = CrmStore(database_path)
+    await store.initialize()
+
+    await store.upsert_entities(
+        "department",
+        [{"ID": "7", "NAME": "Продажи"}],
+    )
+    await store.upsert_entities(
+        "user",
+        [
+            {
+                "ID": "10",
+                "NAME": "Иван",
+                "LAST_NAME": "Петров",
+                "ACTIVE": True,
+                "UF_DEPARTMENT": [7],
+            }
+        ],
+    )
+
+    sat = datetime(2026, 8, 8, 7, 0, tzinfo=UTC)
+    await store.upsert_entities(
+        "lead",
+        [
+            {
+                "ID": "1",
+                "STATUS_SEMANTIC_ID": "P",
+                "ASSIGNED_BY_ID": "10",
+                "DATE_CREATE": sat.isoformat(),
+                "DATE_MODIFY": sat.isoformat(),
+            },
+            {
+                "ID": "2",
+                "STATUS_SEMANTIC_ID": "P",
+                "ASSIGNED_BY_ID": "7912",
+                "DATE_CREATE": (sat + timedelta(hours=1)).isoformat(),
+                "DATE_MODIFY": (sat + timedelta(hours=1)).isoformat(),
+            },
+        ],
+        modified_field="DATE_MODIFY",
+    )
+
+    settings = Settings(
+        _env_file=None,
+        database_path=database_path,
+        rop_timezone="Europe/Moscow",
+    )
+    report = await build_weekend_lead_report(settings, now=now)
+
+    assert report.total_leads == 2
+    assert [item.assigned_by_id for item in report.managers] == ["10"]
+    assert [item.assigned_by_id for item in report.excluded_attribution] == ["7912"]
+    assert sum(item.leads for item in report.managers + report.excluded_attribution) == 2
+
+    directory = await load_rop_directory(database_path)
+    text = format_weekend_lead_report(
+        report,
+        directory,
+        timezone_name=settings.rop_timezone,
+    )
+    assert "Иван Петров · Продажи (ID 10)" in text
+    assert "Исключённая атрибуция · НЕ менеджеры:" in text
+    assert "ID 7912" in text
