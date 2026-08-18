@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "source": "data\\stage410b_bitrix_funnels.json",
+  "lead": {
+    "unprocessed": {
+      "status_id": "NEW",
+      "name": "Не обработан",
+      "match_type": "exact"
+    },
+    "qualified": {
+      "status_id": "CONVERTED",
+      "name": "Качественный лид",
+      "match_type": "exact"
+    }
+  },
+  "business_policy_funnel": {
+    "category_id": 7,
+    "entity_id": "DEAL_STAGE_7",
+    "name": "Продажи B2C",
+    "stage_sla": {
+      "new_application": {
+        "questionnaire_name": "Новая заявка",
+        "bitrix_name": "Новая",
+        "status_id": "C7:NEW",
+        "match_type": "business_confirmed_alias",
+        "needs_business_confirmation": false
+      },
+      "needs_discovery": {
+        "questionnaire_name": "Выявление потребностей",
+        "bitrix_name": "Выявление потребностей",
+        "status_id": "C7:PREPARATION",
+        "match_type": "exact",
+        "needs_business_confirmation": false
+      },
+      "package_tour_selection": {
+        "questionnaire_name": "Подбор пакетного тура",
+        "bitrix_name": "Подбор пакетного тура",
+        "status_id": "C7:PREPAYMENT_INVOICE",
+        "match_type": "exact",
+        "needs_business_confirmation": false
+      },
+      "partner_request": {
+        "questionnaire_name": "Запрос отправлен партнеру",
+        "bitrix_name": "Запрос отправлен партнеру",
+        "status_id": "C7:UC_IAVLST",
+        "match_type": "exact",
+        "needs_business_confirmation": false
+      },
+      "proposal_sent": {
+        "questionnaire_name": "Коммерческое предложение отправлено",
+        "bitrix_name": "КП отправлено",
+        "status_id": "C7:EXECUTING",
+        "match_type": "business_confirmed_alias",
+        "needs_business_confirmation": false
+      },
+      "potential_client": {
+        "questionnaire_name": "Потенциальный клиент",
+        "bitrix_name": "Потенциальный клиент",
+        "status_id": "C7:FINAL_INVOICE",
+        "match_type": "exact",
+        "needs_business_confirmation": false
+      }
+    },
+    "successful_sale_stages": {
+      "prepayment_received": {
+        "status_id": "C7:UC_9XH4U7",
+        "name": "Предоплата получена"
+      },
+      "booking_confirmed": {
+        "status_id": "C7:UC_TJNUX1",
+        "name": "Бронирование подтверждено"
+      },
+      "soon_departure": {
+        "status_id": "C7:UC_CMGBK2",
+        "name": "Скоро вылет"
+      },
+      "service_delivery": {
+        "status_id": "C7:UC_VS9U11",
+        "name": "Оказание услуги"
+      },
+      "deal_completed": {
+        "status_id": "C7:WON",
+        "name": "Сделка состоялась"
+      }
+    },
+    "lost_sale_stages": {
+      "service_unavailable": {
+        "status_id": "C7:LOSE",
+        "name": "Не могли предоставить сервис"
+      },
+      "slow_response": {
+        "status_id": "C7:APOLOGY",
+        "name": "Долгий ответ клиенту"
+      },
+      "high_price": {
+        "status_id": "C7:UC_O89RHD",
+        "name": "Высокая цена"
+      },
+      "other": {
+        "status_id": "C7:UC_YWA3CM",
+        "name": "Другое"
+      }
+    },
+    "conversion_sequence": [
+      {
+        "entity": "lead",
+        "status_id": "NEW",
+        "name": "Не обработан"
+      },
+      {
+        "entity": "lead",
+        "status_id": "CONVERTED",
+        "name": "Качественный лид"
+      },
+      {
+        "entity": "deal",
+        "category_id": 7,
+        "status_id": "C7:NEW",
+        "name": "Новая",
+        "questionnaire_alias": "Новая сделка"
+      },
+      {
+        "entity": "deal",
+        "category_id": 7,
+        "status_id": "C7:EXECUTING",
+        "name": "КП отправлено"
+      },
+      {
+        "entity": "deal",
+        "category_id": 7,
+        "status_id": "C7:UC_TJNUX1",
+        "name": "Бронирование подтверждено"
+      }
+    ]
+  },
+  "other_discovered_funnels": [
+    {
+      "category_id": 0,
+      "name": "???????? ???????????",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    },
+    {
+      "category_id": 2,
+      "name": "Консьерж-сервис",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    },
+    {
+      "category_id": 8,
+      "name": "Продажи B2B",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    },
+    {
+      "category_id": 12,
+      "name": "Реактивация",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    },
+    {
+      "category_id": 11,
+      "name": "Новая воронка",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    },
+    {
+      "category_id": 5,
+      "name": "Новая воронка «Лид»",
+      "binding_state": "unbound",
+      "reason": "No separate approved stage-SLA contract."
+    }
+  ],
+  "blockers": [
+    "define_separate_stage_sla_for_other_funnels"
+  ],
+  "resolved_business_confirmations": {
+    "new_application": {
+      "status_id": "C7:NEW",
+      "confirmed": true
+    },
+    "proposal_sent": {
+      "status_id": "C7:EXECUTING",
+      "confirmed": true
+    }
+  }
+}

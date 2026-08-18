@@ -2,53 +2,224 @@
   "schema_version": 1,
   "policies": {
     "first_response_sla": {
-      "approval_status": "pending",
-      "approved_by": "",
-      "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of timer, event, clock, reassignment and threshold."
+      "approval_status": "approved",
+      "approved_by": "customer_questionnaire",
+      "approved_at": "2026-08-18T14:42:00+03:00",
+      "parameters": {
+        "timer_start": "lead_created",
+        "threshold_seconds": 900,
+        "clock": "business_hours_only",
+        "outside_working_hours": "start_at_next_workday",
+        "reassignment": "continue_from_original_start",
+        "blocked_fields": [],
+        "work_schedule": {
+          "timezone": "Europe/Moscow",
+          "working_weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "workday_start": "09:00",
+          "workday_end": "19:00",
+          "weekends_are_non_working": true,
+          "holiday_calendar": "RU_FEDERAL"
+        },
+        "business_duration": {
+          "value": 15,
+          "unit": "business_minute",
+          "resolved_business_seconds": 900
+        }
+      },
+      "note": "Business rule approved. Exact working calendar is still missing, so SLA verdict remains non-operational."
     },
     "stale_deal": {
-      "approval_status": "pending",
-      "approved_by": "",
-      "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of inactivity window and relevant activity."
+      "approval_status": "approved",
+      "approved_by": "customer_questionnaire",
+      "approved_at": "2026-08-18T14:42:00+03:00",
+      "parameters": {
+        "qualifying_activity": [
+          "outbound_call",
+          "inbound_call",
+          "message_to_client",
+          "commercial_proposal_sent"
+        ],
+        "general_inactivity_threshold_seconds": 900,
+        "stage_thresholds": {
+          "Новая заявка": {
+            "threshold_seconds": 900,
+            "source_value": 15,
+            "source_unit": "business_minute",
+            "clock": "business_time"
+          },
+          "Выявление потребностей": {
+            "threshold_seconds": 108000,
+            "source_value": 3,
+            "source_unit": "business_day",
+            "clock": "business_time"
+          },
+          "Подбор пакетного тура": {
+            "threshold_seconds": 14400,
+            "source_value": 4,
+            "source_unit": "business_hour",
+            "clock": "business_time"
+          },
+          "Запрос отправлен партнеру": {
+            "threshold_seconds": 86400,
+            "source_value": 24,
+            "source_unit": "business_hour",
+            "clock": "business_time"
+          },
+          "Коммерческое предложение отправлено": {
+            "threshold_seconds": 72000,
+            "source_value": 2,
+            "source_unit": "business_day",
+            "clock": "business_time"
+          },
+          "Потенциальный клиент": {
+            "threshold_mode": "return_to_client_date"
+          }
+        },
+        "threshold_precedence": "not_specified",
+        "blocked_fields": [
+          "potential_client_return_date_field_id"
+        ],
+        "timer_semantics": {
+          "start_on_stage_entry": true,
+          "restart_on_qualifying_activity": true,
+          "stop_on_stage_exit": true,
+          "anchor": "max(stage_entered_at,last_qualifying_activity_at)"
+        },
+        "threshold_application": "explicit_stage_threshold",
+        "unspecified_stage_mode": "not_applicable",
+        "general_threshold_usage": "source_value_not_global_fallback",
+        "business_day_seconds": 36000,
+        "business_time_semantics": "count_only_inside_work_schedule"
+      },
+      "note": "General and stage-specific thresholds are stored without inventing precedence."
     },
     "proposal_stale": {
-      "approval_status": "pending",
-      "approved_by": "",
-      "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of proposal-sent event and follow-up window."
+      "approval_status": "approved",
+      "approved_by": "customer_questionnaire",
+      "approved_at": "2026-08-18T14:42:00+03:00",
+      "parameters": {
+        "sent_fact_requires_all": [
+          "transition_to_proposal_stage",
+          "message_to_client_with_proposal"
+        ],
+        "attention_after_no_client_response_seconds": 72000,
+        "business_duration": {
+          "value": 2,
+          "unit": "business_day",
+          "resolved_business_seconds": 72000
+        },
+        "clock": "business_time"
+      },
+      "note": "Proposal fact requires both conditions. Attention window is 2 days."
     },
     "business_conversion": {
-      "approval_status": "pending",
-      "approved_by": "",
-      "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of source cohort, target event and attribution."
+      "approval_status": "approved",
+      "approved_by": "customer_questionnaire",
+      "approved_at": "2026-08-18T14:42:00+03:00",
+      "parameters": {
+        "analyze_each_funnel_separately": true,
+        "key_sequence": [
+          "Не обработан",
+          "качественный лид/Новая сделка",
+          "КП отправлено",
+          "Бронирование подтверждено"
+        ],
+        "successful_stages": [
+          "Предоплата получена",
+          "Бронирование подтверждено",
+          "Скоро вылет",
+          "Оказание услуги",
+          "Сделка состоялась"
+        ],
+        "lost_stages": [
+          "Не могли предоставить сервис",
+          "Долгий ответ клиенту",
+          "Высокая цена",
+          "Другое"
+        ],
+        "blocked_fields": [
+          "bitrix_funnel_category_ids",
+          "bitrix_stage_and_status_ids"
+        ]
+      },
+      "note": "Business names approved. Bitrix IDs are not bound yet."
     },
     "manager_rating": {
       "approval_status": "pending",
       "approved_by": "",
       "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of metrics, weights, normalization and exclusions."
+      "parameters": {
+        "selected_metrics": [
+          "plan_completion",
+          "revenue",
+          "sales_count",
+          "conversion",
+          "stale_deals_count",
+          "lost_deals_count"
+        ],
+        "top_3_priority": [
+          "plan_completion",
+          "revenue",
+          "conversion"
+        ],
+        "blocked_fields": [
+          "rating_weights",
+          "normalization_method"
+        ]
+      },
+      "note": "Metrics are known but rating weights are missing."
     },
     "sales_plan_fact": {
       "approval_status": "pending",
       "approved_by": "",
       "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of plan source, period, ownership and financial measure."
+      "parameters": {
+        "metric": "margin_profit",
+        "source": "excel",
+        "period": "month",
+        "blocked_fields": [
+          "excel_schema",
+          "plan_ownership_or_allocation"
+        ]
+      },
+      "note": "Margin, Excel and monthly period are known; Excel schema and ownership are missing."
     },
     "management_escalation": {
       "approval_status": "pending",
       "approved_by": "",
       "approved_at": "",
-      "parameters": {},
-      "note": "Awaiting business approval of mandatory intervention conditions."
+      "parameters": {
+        "selected_conditions": [
+          "client_waits_too_long_for_first_response",
+          "expensive_deal_is_stale",
+          "no_work_after_commercial_proposal",
+          "manager_has_no_activity_for_several_days",
+          "manager_conversion_dropped_sharply",
+          "department_conversion_dropped_sharply",
+          "monthly_plan_at_risk",
+          "large_deal_lost"
+        ],
+        "long_stage_attention": [
+          "Новая",
+          "Выявление потребностей",
+          "Подбор пакетного тура",
+          "Запрос отправлен партнеру"
+        ],
+        "blocked_fields": [
+          "expensive_deal_threshold",
+          "manager_conversion_drop_threshold",
+          "department_conversion_drop_threshold",
+          "plan_risk_threshold",
+          "large_lost_deal_threshold"
+        ]
+      },
+      "note": "Conditions selected, but several numeric thresholds are still missing."
     }
   }
 }

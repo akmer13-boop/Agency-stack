@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "timezone": "Europe/Moscow",
+  "working_weekdays": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "workday_start": "09:00",
+  "workday_end": "19:00",
+  "weekends_are_non_working": true,
+  "holiday_calendar": {
+    "country": "RU",
+    "mode": "federal_non_working_days",
+    "provider": "official_static_json",
+    "supported_years": [
+      2026
+    ],
+    "file_pattern": "config/rop-ru-holidays-{year}.json",
+    "fail_closed_for_unsupported_years": true
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "source": "customer_completed_questionnaire_2026_08_18",
+  "morning_report": {
+    "desired_time": "10:00",
+    "selected_items": [
+      "sales_yesterday",
+      "sales_current_month",
+      "plan_completion_forecast",
+      "new_leads",
+      "conversion",
+      "active_deals",
+      "stale_deals",
+      "response_speed_problems",
+      "best_managers",
+      "managers_with_declining_metrics",
+      "large_deals_requiring_attention",
+      "changes_vs_yesterday_or_previous_week",
+      "ai_rop_recommendations_today"
+    ],
+    "selected_item_count": 13,
+    "question_max_items": 10,
+    "selection_limit_conflict": true
+  },
+  "ai_permissions": {
+    "allowed_now": [
+      "analyze_data",
+      "recommend_to_manager",
+      "prepare_meeting_materials",
+      "prepare_1to1_manager_reviews",
+      "find_deals_for_manual_review",
+      "suggest_next_step_to_manager"
+    ],
+    "future_only": [
+      "create_reminders",
+      "send_manager_warnings",
+      "escalate_critical_deals"
+    ],
+    "crm_write_allowed_now": false
+  },
+  "global_blockers": [
+    "work_schedule_and_holiday_calendar",
+    "general_vs_stage_stale_threshold_precedence",
+    "rating_weights_and_normalization",
+    "sales_plan_excel_schema_and_ownership",
+    "numeric_escalation_thresholds",
+    "bitrix_funnel_and_stage_id_binding"
+  ]
+}
