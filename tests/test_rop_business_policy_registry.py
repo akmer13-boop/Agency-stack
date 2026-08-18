@@ -33,13 +33,25 @@ def _config_payload() -> dict[str, object]:
     }
 
 
-def test_default_registry_file_is_valid_and_pending() -> None:
+def test_default_registry_file_reflects_customer_questionnaire() -> None:
     document = load_business_policy_document("config/rop-business-policies.json")
 
     assert document.valid is True
     assert document.schema_version == 1
     assert tuple(item.key for item in document.policies) == BUSINESS_POLICY_KEYS
-    assert {item.approval_status for item in document.policies} == {ApprovalStatus.PENDING}
+
+    by_key = {item.key: item for item in document.policies}
+
+    assert by_key["first_response_sla"].approval_status is ApprovalStatus.APPROVED
+    assert by_key["stale_deal"].approval_status is ApprovalStatus.APPROVED
+    assert by_key["proposal_stale"].approval_status is ApprovalStatus.APPROVED
+    assert by_key["business_conversion"].approval_status is ApprovalStatus.APPROVED
+
+    assert by_key["manager_rating"].approval_status is ApprovalStatus.PENDING
+    assert by_key["sales_plan_fact"].approval_status is ApprovalStatus.PENDING
+    assert by_key["management_escalation"].approval_status is ApprovalStatus.PENDING
+
+    assert by_key["first_response_sla"].parameters["threshold_seconds"] == 900
 
 
 def test_registry_fails_closed_on_missing_or_unexpected_policy(tmp_path) -> None:

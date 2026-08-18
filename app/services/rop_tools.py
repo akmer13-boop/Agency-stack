@@ -67,6 +67,10 @@ from app.services.rop_mvp3 import (
     format_focus_report,
     format_stage_sla_report,
 )
+from app.services.rop_openlines_response import (
+    build_openlines_response_report,
+    format_openlines_response_for_ai,
+)
 from app.services.rop_recent_activity import (
     build_recent_deal_activity,
     format_recent_deal_activity_for_ai,
@@ -307,6 +311,31 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         return format_lead_response_evidence_for_ai(report)
 
     @function_tool
+    async def get_rop_openlines_response(
+        days: int = 7,
+        manager_id: int | None = None,
+    ) -> str:
+        """Return factual response timing from real Open Lines human messages.
+
+        Use this tool for questions about actual messenger/Open Lines response
+        timing in WhatsApp, Telegram, MAX, Instagram or VK. The rolling window
+        is based on the manager-response event timestamp. This is factual calendar
+        elapsed evidence, not First Response SLA, manager ranking or a quality score.
+
+        Args:
+            days: Rolling response-event lookback from 1 to 365 days.
+            manager_id: Optional DIRECTORY_USER manager ID for factual filtering.
+        """
+        if days < 1 or days > 365:
+            return "Период Open Lines response должен быть от 1 до 365 дней."
+        report = await build_openlines_response_report(
+            settings.database_path,
+            days,
+            manager_id=str(manager_id) if manager_id is not None else None,
+        )
+        return format_openlines_response_for_ai(report)
+
+    @function_tool
     async def get_rop_lead_response_trend(weeks: int = 4) -> str:
         """Return mature week-over-week lead response evidence trend.
 
@@ -432,6 +461,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_deal_activity,
         get_rop_leads,
         get_rop_lead_response_evidence,
+        get_rop_openlines_response,
         get_rop_lead_response_trend,
         get_rop_first_response_policy,
         get_rop_business_policy_status,
