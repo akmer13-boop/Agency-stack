@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     bitrix24_sync_overlap_minutes: int = Field(default=5, ge=0, le=120)
     bitrix24_reconciliation_audit_path: str = ""
 
+    bitrix_event_endpoint_enabled: bool = False
+    bitrix_event_application_token: str = Field(default="", repr=False)
+    bitrix_event_member_id: str = ""
+    bitrix_event_domain: str = ""
+    bitrix_event_max_body_bytes: int = Field(
+        default=262_144,
+        ge=1024,
+        le=2_000_000,
+    )
+
     rop_attention_days: int = Field(default=3, ge=1, le=365)
     rop_critical_days: int = Field(default=5, ge=1, le=365)
     rop_risk_limit: int = Field(default=20, ge=1, le=100)

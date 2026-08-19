@@ -43,6 +43,7 @@ def test_health_reports_safe_runtime_state(client: TestClient) -> None:
         "openai_configured": True,
         "telegram_configured": False,
         "bitrix24_configured": False,
+        "bitrix_realtime_events_enabled": False,
         "crm_write_enabled": False,
         "rop_scheduler_state": "disabled",
         "rop_scheduler_health": "disabled",
