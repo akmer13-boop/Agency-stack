@@ -1,6 +1,6 @@
-# Stage 4.12A - Lead Policy Profile Resolution
+﻿# Stage 4.12A - Lead Policy Profile Resolution
 
-Status: LOCAL / NOT COMMITTED
+Status: IMPLEMENTED / TESTED / READY FOR PR
 
 Purpose:
 resolve Tourism B2C scope for leads without applying B2C
@@ -62,4 +62,4 @@ Safety:
 - no production activation
 - no customer message text analysis
 - local profile persistence only
-- no commit/push
+- committed and pushed on feature branch; production activation remains disabled
