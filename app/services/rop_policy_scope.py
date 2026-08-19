@@ -9,8 +9,28 @@ from typing import Any
 from app.services.rop_policy_engine import (
     load_policy_contract,
 )
+from app.storage.rop_lead_policy_profile_store import (
+    TOURISM_B2C_PROFILE,
+    RopLeadPolicyProfileStore,
+)
 
-TOURISM_B2C_PROFILE = "tourism_b2c"
+B2C_DEPARTMENT_ID = "19"
+
+EXPLICIT_LEAD_EXCLUSIONS = (
+    ("36", "concierge"),
+    ("41", "concierge"),
+    ("44", "concierge"),
+    ("20", "b2b"),
+    ("24", "russian_tour"),
+)
+
+CONCIERGE_DEPARTMENT_IDS = frozenset(
+    {
+        "36",
+        "41",
+        "44",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +41,8 @@ class PolicyScopeDecision:
     eligible: bool
     reason: str
     category_id: str = ""
+    department_ids: tuple[str, ...] = ()
+    evidence_kind: str = ""
 
 
 def _connect(
@@ -34,6 +56,7 @@ def _connect(
     )
 
     connection.row_factory = sqlite3.Row
+
     connection.execute("PRAGMA query_only=ON")
 
     return connection
@@ -48,7 +71,10 @@ def _objects(
             """
             SELECT name
             FROM sqlite_master
-            WHERE type IN ('table', 'view')
+            WHERE type IN (
+                'table',
+                'view'
+            )
             """
         )
     }
@@ -69,7 +95,10 @@ def _crm_source(
 def _payload(
     value: Any,
 ) -> dict[str, Any] | None:
-    if not isinstance(value, str):
+    if not isinstance(
+        value,
+        str,
+    ):
         return None
 
     try:
@@ -77,13 +106,22 @@ def _payload(
     except json.JSONDecodeError:
         return None
 
-    return parsed if isinstance(parsed, dict) else None
+    return (
+        parsed
+        if isinstance(
+            parsed,
+            dict,
+        )
+        else None
+    )
 
 
-def _deal_category(
+def _entity_payload(
     database_path: str,
-    deal_id: int,
-) -> str | None:
+    *,
+    entity_type: str,
+    entity_id: int,
+) -> dict[str, Any] | None:
     connection = _connect(database_path)
 
     try:
@@ -96,30 +134,418 @@ def _deal_category(
             f"""
             SELECT payload_json
             FROM {source}
-            WHERE entity_type = 'deal'
+            WHERE entity_type = ?
               AND entity_id = ?
             LIMIT 1
             """,
-            (str(deal_id),),
+            (
+                entity_type,
+                str(entity_id),
+            ),
         ).fetchone()
 
         if row is None:
             return None
 
-        item = _payload(row["payload_json"])
-
-        if item is None:
-            return None
-
-        value = item.get("CATEGORY_ID")
-
-        if value in (None, ""):
-            return None
-
-        return str(value).strip()
+        return _payload(row["payload_json"])
 
     finally:
         connection.close()
+
+
+def _department_ids(
+    value: Any,
+) -> tuple[str, ...]:
+    if value in (
+        None,
+        "",
+    ):
+        return ()
+
+    if isinstance(
+        value,
+        (
+            list,
+            tuple,
+            set,
+        ),
+    ):
+        return tuple(
+            sorted(
+                {
+                    str(item).strip()
+                    for item in value
+                    if item
+                    not in (
+                        None,
+                        "",
+                    )
+                }
+            )
+        )
+
+    return (str(value).strip(),)
+
+
+def _assigned_department_ids(
+    database_path: str,
+    payload: dict[str, Any],
+) -> tuple[str, ...]:
+    assigned = payload.get("ASSIGNED_BY_ID") or payload.get("RESPONSIBLE_ID")
+
+    if assigned in (
+        None,
+        "",
+    ):
+        return ()
+
+    user = _entity_payload(
+        database_path,
+        entity_type="user",
+        entity_id=int(str(assigned)),
+    )
+
+    if user is None:
+        return ()
+
+    return _department_ids(user.get("UF_DEPARTMENT"))
+
+
+def _tourism_category_id() -> str:
+    contract = load_policy_contract()
+
+    funnel = contract.binding.get("business_policy_funnel")
+
+    if not isinstance(
+        funnel,
+        dict,
+    ):
+        return ""
+
+    return str(funnel.get("category_id") or "").strip()
+
+
+def _linked_deals(
+    database_path: str,
+    lead_id: int,
+) -> tuple[tuple[int, str], ...]:
+    connection = _connect(database_path)
+
+    try:
+        source = _crm_source(_objects(connection))
+
+        if source is None:
+            return ()
+
+        rows = connection.execute(
+            f"""
+            SELECT
+                entity_id,
+                payload_json
+            FROM {source}
+            WHERE entity_type = 'deal'
+              AND json_valid(
+                    payload_json
+                  )
+              AND CAST(
+                    json_extract(
+                        payload_json,
+                        '$.LEAD_ID'
+                    )
+                    AS TEXT
+                  ) = ?
+            ORDER BY
+                CAST(
+                    entity_id
+                    AS INTEGER
+                )
+            """,
+            (str(lead_id),),
+        ).fetchall()
+
+        result: list[tuple[int, str]] = []
+
+        for row in rows:
+            item = _payload(row["payload_json"])
+
+            if item is None:
+                continue
+
+            raw_category = item.get("CATEGORY_ID")
+
+            if raw_category in (
+                None,
+                "",
+            ):
+                continue
+
+            try:
+                deal_id = int(row["entity_id"])
+            except (
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+            result.append(
+                (
+                    deal_id,
+                    str(raw_category).strip(),
+                )
+            )
+
+        return tuple(result)
+
+    finally:
+        connection.close()
+
+
+def _lead_exclusion(
+    department_ids: tuple[str, ...],
+) -> (
+    tuple[
+        str,
+        str,
+    ]
+    | None
+):
+    departments = set(department_ids)
+
+    for (
+        department_id,
+        label,
+    ) in EXPLICIT_LEAD_EXCLUSIONS:
+        if department_id in departments:
+            return (
+                department_id,
+                label,
+            )
+
+    return None
+
+
+def _resolve_lead_scope(
+    database_path: str,
+    lead_id: int,
+) -> PolicyScopeDecision:
+    lead = _entity_payload(
+        database_path,
+        entity_type="lead",
+        entity_id=lead_id,
+    )
+
+    if lead is None:
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key="unresolved",
+            eligible=False,
+            reason="lead_policy_profile_unresolved",
+        )
+
+    departments = _assigned_department_ids(
+        database_path,
+        lead,
+    )
+
+    exclusion = _lead_exclusion(departments)
+
+    if exclusion is not None:
+        (
+            department_id,
+            label,
+        ) = exclusion
+
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key="excluded",
+            eligible=False,
+            reason=("lead_department_excluded:" + label),
+            department_ids=departments,
+            evidence_kind=("department:" + department_id),
+        )
+
+    linked = _linked_deals(
+        database_path,
+        lead_id,
+    )
+
+    tourism_category = _tourism_category_id()
+
+    categories = {
+        category_id
+        for (
+            _deal_id,
+            category_id,
+        ) in linked
+    }
+
+    if tourism_category and tourism_category in categories and len(categories) > 1:
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key="unresolved",
+            eligible=False,
+            reason=("lead_linked_multiple_funnels"),
+            category_id=(tourism_category),
+            department_ids=departments,
+            evidence_kind=("deal_link_conflict"),
+        )
+
+    if tourism_category and categories == {
+        tourism_category,
+    }:
+        deal_id = next(
+            deal_id
+            for (
+                deal_id,
+                category_id,
+            ) in linked
+            if (category_id == tourism_category)
+        )
+
+        RopLeadPolicyProfileStore(database_path).confirm_tourism_b2c(
+            lead_id=lead_id,
+            evidence_kind=("linked_b2c_deal"),
+            evidence_ref=("deal:" + str(deal_id) + ":category:" + tourism_category),
+        )
+
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key=(TOURISM_B2C_PROFILE),
+            eligible=True,
+            reason=("lead_linked_b2c_deal"),
+            category_id=(tourism_category),
+            department_ids=departments,
+            evidence_kind=("linked_b2c_deal"),
+        )
+
+    if categories:
+        first_category = sorted(categories)[0]
+
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key="unbound",
+            eligible=False,
+            reason=("lead_linked_non_b2c_deal"),
+            category_id=(first_category),
+            department_ids=departments,
+            evidence_kind=("linked_non_b2c_deal"),
+        )
+
+    if B2C_DEPARTMENT_ID in set(departments):
+        RopLeadPolicyProfileStore(database_path).confirm_tourism_b2c(
+            lead_id=lead_id,
+            evidence_kind=("b2c_department"),
+            evidence_ref=("department:" + B2C_DEPARTMENT_ID),
+        )
+
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key=(TOURISM_B2C_PROFILE),
+            eligible=True,
+            reason=("lead_b2c_department_match"),
+            department_ids=departments,
+            evidence_kind=("b2c_department"),
+        )
+
+    sticky = RopLeadPolicyProfileStore(database_path).get(lead_id)
+
+    if sticky is not None and sticky.profile_key == TOURISM_B2C_PROFILE:
+        return PolicyScopeDecision(
+            entity_type="lead",
+            entity_id=lead_id,
+            profile_key=(TOURISM_B2C_PROFILE),
+            eligible=True,
+            reason=("lead_b2c_profile_sticky"),
+            department_ids=departments,
+            evidence_kind=(sticky.evidence_kind),
+        )
+
+    return PolicyScopeDecision(
+        entity_type="lead",
+        entity_id=lead_id,
+        profile_key="unresolved",
+        eligible=False,
+        reason=("lead_policy_profile_unresolved"),
+        department_ids=departments,
+    )
+
+
+def _resolve_deal_scope(
+    database_path: str,
+    deal_id: int,
+) -> PolicyScopeDecision:
+    deal = _entity_payload(
+        database_path,
+        entity_type="deal",
+        entity_id=deal_id,
+    )
+
+    if deal is None:
+        return PolicyScopeDecision(
+            entity_type="deal",
+            entity_id=deal_id,
+            profile_key="unresolved",
+            eligible=False,
+            reason="deal_not_found",
+        )
+
+    departments = _assigned_department_ids(
+        database_path,
+        deal,
+    )
+
+    if set(departments) & CONCIERGE_DEPARTMENT_IDS:
+        return PolicyScopeDecision(
+            entity_type="deal",
+            entity_id=deal_id,
+            profile_key="excluded",
+            eligible=False,
+            reason=("deal_department_excluded:concierge"),
+            department_ids=departments,
+            evidence_kind=("concierge_department"),
+        )
+
+    category_id = str(deal.get("CATEGORY_ID") or "").strip()
+
+    if not category_id:
+        return PolicyScopeDecision(
+            entity_type="deal",
+            entity_id=deal_id,
+            profile_key="unresolved",
+            eligible=False,
+            reason=("deal_category_missing"),
+            department_ids=departments,
+        )
+
+    tourism_category = _tourism_category_id()
+
+    if tourism_category and category_id == tourism_category:
+        return PolicyScopeDecision(
+            entity_type="deal",
+            entity_id=deal_id,
+            profile_key=(TOURISM_B2C_PROFILE),
+            eligible=True,
+            reason=("tourism_b2c_category_match"),
+            category_id=category_id,
+            department_ids=departments,
+            evidence_kind=("deal_category"),
+        )
+
+    return PolicyScopeDecision(
+        entity_type="deal",
+        entity_id=deal_id,
+        profile_key="unbound",
+        eligible=False,
+        reason=("deal_policy_profile_unbound:" + category_id),
+        category_id=category_id,
+        department_ids=departments,
+    )
 
 
 def resolve_policy_scope(
@@ -134,78 +560,25 @@ def resolve_policy_scope(
             entity_id=entity_id,
             profile_key="unresolved",
             eligible=False,
-            reason="policy_scope_entity_id_invalid",
+            reason=("policy_scope_entity_id_invalid"),
         )
 
     if entity_type == "lead":
-        # Deliberately fail closed.
-        #
-        # A lead has no deal CATEGORY_ID yet. Until a verified
-        # lead -> business-profile binding exists, automatically
-        # applying the Tourism B2C first-response SLA could
-        # incorrectly score Concierge or another business line.
-        return PolicyScopeDecision(
-            entity_type="lead",
-            entity_id=entity_id,
-            profile_key="unresolved",
-            eligible=False,
-            reason="lead_policy_profile_unresolved",
+        return _resolve_lead_scope(
+            database_path,
+            entity_id,
         )
 
-    if entity_type != "deal":
-        return PolicyScopeDecision(
-            entity_type=entity_type,
-            entity_id=entity_id,
-            profile_key="unresolved",
-            eligible=False,
-            reason="entity_type_has_no_policy_profile",
-        )
-
-    category_id = _deal_category(
-        database_path,
-        entity_id,
-    )
-
-    if category_id is None:
-        return PolicyScopeDecision(
-            entity_type="deal",
-            entity_id=entity_id,
-            profile_key="unresolved",
-            eligible=False,
-            reason="deal_category_missing",
-        )
-
-    contract = load_policy_contract()
-
-    funnel = contract.binding.get("business_policy_funnel")
-
-    if not isinstance(funnel, dict):
-        return PolicyScopeDecision(
-            entity_type="deal",
-            entity_id=entity_id,
-            profile_key="unresolved",
-            eligible=False,
-            reason="tourism_policy_funnel_missing",
-            category_id=category_id,
-        )
-
-    tourism_category = str(funnel.get("category_id") or "").strip()
-
-    if tourism_category and category_id == tourism_category:
-        return PolicyScopeDecision(
-            entity_type="deal",
-            entity_id=entity_id,
-            profile_key=TOURISM_B2C_PROFILE,
-            eligible=True,
-            reason="tourism_b2c_category_match",
-            category_id=category_id,
+    if entity_type == "deal":
+        return _resolve_deal_scope(
+            database_path,
+            entity_id,
         )
 
     return PolicyScopeDecision(
-        entity_type="deal",
+        entity_type=entity_type,
         entity_id=entity_id,
-        profile_key="unbound",
+        profile_key="unresolved",
         eligible=False,
-        reason=("deal_policy_profile_unbound:" + category_id),
-        category_id=category_id,
+        reason=("entity_type_has_no_policy_profile"),
     )

@@ -178,6 +178,43 @@ def _activity_owner(
         connection.close()
 
 
+def _deal_linked_lead(
+    database_path: str,
+    deal_id: int,
+) -> int | None:
+    connection = _connect(database_path)
+
+    try:
+        source = _crm_source(_objects(connection))
+
+        if source is None:
+            return None
+
+        row = connection.execute(
+            f"""
+            SELECT payload_json
+            FROM {source}
+            WHERE entity_type = 'deal'
+              AND entity_id = ?
+            LIMIT 1
+            """,
+            (str(deal_id),),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        item = _payload(row["payload_json"])
+
+        if item is None:
+            return None
+
+        return _positive_id(item.get("LEAD_ID"))
+
+    finally:
+        connection.close()
+
+
 def _call_targets(
     database_path: str,
     event_key: str,
@@ -277,6 +314,20 @@ def resolve_sla_targets(
                     entity_id,
                 )
             )
+
+            if event.entity_type == "deal":
+                linked_lead_id = _deal_linked_lead(
+                    database_path,
+                    entity_id,
+                )
+
+                if linked_lead_id is not None:
+                    targets.add(
+                        (
+                            "lead",
+                            linked_lead_id,
+                        )
+                    )
 
     elif event.entity_type == "activity":
         owner = _activity_owner(
