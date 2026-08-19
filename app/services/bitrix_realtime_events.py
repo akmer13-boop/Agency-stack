@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+from app.integrations.bitrix24.event_privacy import (
+    minimize_bitrix_event_data,
+)
 from app.storage.bitrix_event_store import (
     BitrixEventInboxStore,
 )
@@ -397,7 +400,9 @@ def normalize_bitrix_event(
 
     event_handler_id = _text(payload.get("event_handler_id"))
 
-    data = _mapping(payload.get("data"))
+    raw_data = _mapping(payload.get("data"))
+
+    data = raw_data
 
     entity_id = ""
     call_id = ""
@@ -408,7 +413,7 @@ def normalize_bitrix_event(
         "deal",
         "activity",
     }:
-        entity_id = _crm_entity_id(data)
+        entity_id = _crm_entity_id(raw_data)
 
         if not entity_id:
             raise BitrixRealtimeEventError(
@@ -417,15 +422,20 @@ def normalize_bitrix_event(
             )
 
     elif entity_type == "call":
-        call_id = _text(data.get("CALL_ID"))
+        call_id = _text(raw_data.get("CALL_ID"))
 
-        actor_user_id = _text(data.get("USER_ID"))
+        actor_user_id = _text(raw_data.get("USER_ID"))
 
         if not call_id:
             raise BitrixRealtimeEventError(
                 422,
                 "Call ID is missing",
             )
+
+    data = minimize_bitrix_event_data(
+        entity_type,
+        raw_data,
+    )
 
     canonical = {
         "event": event_name,
