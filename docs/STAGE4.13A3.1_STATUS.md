@@ -1,6 +1,6 @@
-# Stage 4.13A3.1 - Voximplant Reconciliation
+﻿# Stage 4.13A3.1 - Voximplant Reconciliation
 
-Status: LOCAL / NOT COMMITTED
+Status: COMPLETE
 
 Implemented:
 - voximplant.statistic.get added to the read-only sync client;
