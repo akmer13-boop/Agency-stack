@@ -17,6 +17,7 @@ SYNC_EXTRA_READ_ONLY_METHODS: Final[frozenset[str]] = frozenset(
         "crm.contact.list",
         "crm.company.list",
         "crm.activity.list",
+        "voximplant.statistic.get",
     }
 )
 
