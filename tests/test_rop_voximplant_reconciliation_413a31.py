@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sqlite3
 from datetime import UTC, datetime
@@ -54,6 +54,8 @@ class FakeVoximplantClient:
                         "CALL_FAILED_CODE": "200",
                         "CALL_DURATION": "120",
                         "CRM_ACTIVITY_ID": "101",
+                        "CRM_ENTITY_TYPE": "LEAD",
+                        "CRM_ENTITY_ID": "501",
                         "PHONE_NUMBER": (
                             "+79990000001"
                         ),
@@ -67,6 +69,8 @@ class FakeVoximplantClient:
                         "CALL_FAILED_CODE": "304",
                         "CALL_DURATION": "0",
                         "CRM_ACTIVITY_ID": "102",
+                        "CRM_ENTITY_TYPE": "DEAL",
+                        "CRM_ENTITY_ID": "601",
                         "PHONE_NUMBER": (
                             "+79990000002"
                         ),
@@ -89,6 +93,8 @@ class FakeVoximplantClient:
                     "CALL_FAILED_CODE": "200",
                     "CALL_DURATION": "0",
                     "CRM_ACTIVITY_ID": "103",
+                    "CRM_ENTITY_TYPE": "LEAD",
+                    "CRM_ENTITY_ID": "502",
                     "PHONE_NUMBER": (
                         "+79990000003"
                     ),
@@ -267,16 +273,36 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
             SELECT
                 statistic_id,
                 call_id,
-                crm_activity_id
+                crm_activity_id,
+                crm_entity_type,
+                crm_entity_id
             FROM rop_voximplant_statistic_facts
             ORDER BY statistic_id
             """
         ).fetchall()
 
         assert rows == [
-            ("1", "call-a", "101"),
-            ("2", "call-b", "102"),
-            ("3", "call-c", "103"),
+            (
+                "1",
+                "call-a",
+                "101",
+                "LEAD",
+                "501",
+            ),
+            (
+                "2",
+                "call-b",
+                "102",
+                "DEAL",
+                "601",
+            ),
+            (
+                "3",
+                "call-c",
+                "103",
+                "LEAD",
+                "502",
+            ),
         ]
 
     finally:

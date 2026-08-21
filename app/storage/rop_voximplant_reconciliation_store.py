@@ -14,6 +14,8 @@ class VoximplantStatisticFact:
     call_failed_code: str
     call_duration_seconds: int | None
     crm_activity_id: str
+    crm_entity_type: str
+    crm_entity_id: str
 
 
 async def _prepare(
@@ -59,6 +61,8 @@ class RopVoximplantReconciliationStore:
                         call_failed_code TEXT,
                         call_duration_seconds INTEGER,
                         crm_activity_id TEXT,
+                        crm_entity_type TEXT,
+                        crm_entity_id TEXT,
                         last_seen_run_id INTEGER NOT NULL,
                         updated_at TEXT NOT NULL
                             DEFAULT CURRENT_TIMESTAMP
@@ -108,6 +112,39 @@ class RopVoximplantReconciliationStore:
                     );
                 """
             )
+
+            cursor = await database.execute(
+                """
+                PRAGMA table_info(
+                    rop_voximplant_statistic_facts
+                )
+                """
+            )
+
+            columns = {
+                str(row[1])
+                for row in await cursor.fetchall()
+            }
+
+            if "crm_entity_type" not in columns:
+                await database.execute(
+                    """
+                    ALTER TABLE
+                        rop_voximplant_statistic_facts
+                    ADD COLUMN
+                        crm_entity_type TEXT
+                    """
+                )
+
+            if "crm_entity_id" not in columns:
+                await database.execute(
+                    """
+                    ALTER TABLE
+                        rop_voximplant_statistic_facts
+                    ADD COLUMN
+                        crm_entity_id TEXT
+                    """
+                )
 
             await database.commit()
 
@@ -213,10 +250,12 @@ class RopVoximplantReconciliationStore:
                             call_failed_code,
                             call_duration_seconds,
                             crm_activity_id,
+                            crm_entity_type,
+                            crm_entity_id,
                             last_seen_run_id
                         )
                     VALUES (
-                        ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     ON CONFLICT(statistic_id)
                     DO UPDATE SET
@@ -230,6 +269,10 @@ class RopVoximplantReconciliationStore:
                             excluded.call_duration_seconds,
                         crm_activity_id =
                             excluded.crm_activity_id,
+                        crm_entity_type =
+                            excluded.crm_entity_type,
+                        crm_entity_id =
+                            excluded.crm_entity_id,
                         last_seen_run_id =
                             excluded.last_seen_run_id,
                         updated_at =
@@ -244,6 +287,10 @@ class RopVoximplantReconciliationStore:
                             or None,
                             item.call_duration_seconds,
                             item.crm_activity_id
+                            or None,
+                            item.crm_entity_type
+                            or None,
+                            item.crm_entity_id
                             or None,
                             run_id,
                         )

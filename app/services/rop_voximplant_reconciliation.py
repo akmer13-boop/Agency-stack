@@ -151,6 +151,16 @@ def _sanitize(
                 "CRM_ACTIVITY_ID"
             )
         ),
+        crm_entity_type=_text(
+            row.get(
+                "CRM_ENTITY_TYPE"
+            )
+        ).upper(),
+        crm_entity_id=_text(
+            row.get(
+                "CRM_ENTITY_ID"
+            )
+        ),
     )
 
 
