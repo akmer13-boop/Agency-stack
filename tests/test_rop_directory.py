@@ -134,10 +134,13 @@ async def test_daily_brief_uses_local_employee_name_and_stage_sla(tmp_path: Path
     text = await build_rop_daily(settings)
 
     assert "ИИ-РОП · Daily Brief" in text
+    assert "First Response SLA · 15 бизнес-минут:" in text
+    assert "Aging-risk по текущим стадиям (НЕ Stage SLA):" in text
+    assert "Где горит по SLA:" not in text
     assert "Иван Петров · B2C" in text
     assert "#100" in text
-    assert "Кого разбирать сегодня по stage-specific SLA:" in text
-    assert "SLA-критично 1" in text
-    assert "SLA-внимание (без критичных) 0" in text
+    assert "Кого разбирать по aging-risk (НЕ Stage SLA):" in text
+    assert "aging-критично 1" in text
+    assert "aging-внимание (без критичных) 0" in text
     assert "5+ дней" not in text
     assert "в LLM для этого отчёта не передаются" in text
