@@ -109,6 +109,28 @@ class Settings(BaseSettings):
     rop_scheduler_state_path: str = "data/rop_scheduler_state.json"
     rop_scheduler_health_path: str = "data/rop_scheduler_health.json"
 
+    rop_sla_worker_enabled: bool = False
+    rop_sla_worker_poll_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=300,
+    )
+    rop_sla_worker_event_limit: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+    )
+    rop_sla_worker_deadline_limit: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+    )
+    rop_sla_worker_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+    )
+
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)
     proxy_port: int = Field(default=0, ge=0, le=65535)
