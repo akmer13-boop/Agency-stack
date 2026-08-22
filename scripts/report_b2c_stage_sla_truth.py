@@ -6,7 +6,6 @@ from app.services.rop_b2c_stage_sla_truth import (
     build_b2c_stage_sla_truth,
 )
 
-
 BLOCKER_LABELS = {
     "return_to_client_date_not_configured": (
         "Не настроено поле даты возврата к клиенту"
