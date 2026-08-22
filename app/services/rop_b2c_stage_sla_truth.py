@@ -12,8 +12,9 @@ from app.services.rop_business_time import (
     TimerStatus,
     evaluate_stage_timer,
 )
-from app.services.rop_policy_scope import resolve_policy_scope
-
+from app.services.rop_policy_scope import (
+    resolve_deal_policy_scopes,
+)
 
 TRACKED_STAGE_IDS = (
     "C7:NEW",
@@ -225,15 +226,42 @@ def _current_cutoff(
         else None
     )
 
-    vox_row = connection.execute(
-        """
-        SELECT id, window_start, window_end
-        FROM rop_voximplant_reconciliation_runs
-        WHERE pagination_complete = 1
-        ORDER BY id DESC
-        LIMIT 1
-        """
-    ).fetchone()
+    objects = {
+        str(row[0])
+        for row in connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            """
+        )
+    }
+
+    if "rop_voximplant_coverage" in objects:
+        vox_row = connection.execute(
+            """
+            SELECT
+                last_run_id AS id,
+                window_start,
+                window_end
+            FROM rop_voximplant_coverage
+            WHERE source_key = 'voximplant_statistics'
+            LIMIT 1
+            """
+        ).fetchone()
+    else:
+        vox_row = None
+
+    if vox_row is None:
+        vox_row = connection.execute(
+            """
+            SELECT id, window_start, window_end
+            FROM rop_voximplant_reconciliation_runs
+            WHERE pagination_complete = 1
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
 
     vox_run_id: int | None = None
     vox_start: datetime | None = None
@@ -346,14 +374,15 @@ def _resolved_chat_map(
     }
 
 
-def _stage_entry(
+def _stage_entries(
     connection: sqlite3.Connection,
     *,
-    deal_id: int,
-    deal: dict[str, Any],
-    stage_id: str,
+    deals: dict[int, dict[str, Any]],
     cutoff: datetime,
-) -> tuple[datetime | None, str]:
+) -> dict[
+    int,
+    tuple[datetime | None, str],
+]:
     rows = connection.execute(
         """
         SELECT entity_id, payload_json
@@ -362,39 +391,97 @@ def _stage_entry(
         """
     ).fetchall()
 
-    observed: list[tuple[datetime, str]] = []
+    observed: dict[
+        int,
+        tuple[datetime, str],
+    ] = {}
 
     for row in rows:
         item = _payload(row["payload_json"])
         if item is None:
             continue
-        if str(item.get("OWNER_ID") or "") != str(deal_id):
+
+        try:
+            deal_id = int(
+                str(
+                    item.get("OWNER_ID")
+                    or ""
+                )
+            )
+        except (
+            TypeError,
+            ValueError,
+        ):
             continue
-        if str(item.get("STAGE_ID") or "") != stage_id:
+
+        deal = deals.get(deal_id)
+        if deal is None:
+            continue
+
+        stage_id = str(
+            deal.get("STAGE_ID")
+            or ""
+        ).strip()
+
+        if str(
+            item.get("STAGE_ID")
+            or ""
+        ).strip() != stage_id:
             continue
 
         occurred = _dt(item.get("CREATED_TIME"))
         if occurred is None or occurred > cutoff:
             continue
 
-        observed.append(
-            (occurred, str(row["entity_id"]))
+        candidate = (
+            occurred,
+            str(row["entity_id"]),
+        )
+        current = observed.get(deal_id)
+
+        if current is None or candidate > current:
+            observed[deal_id] = candidate
+
+    result: dict[
+        int,
+        tuple[datetime | None, str],
+    ] = {}
+
+    for deal_id, deal in deals.items():
+        history = observed.get(deal_id)
+        if history is not None:
+            result[deal_id] = (
+                history[0],
+                "",
+            )
+            continue
+
+        moved_at = _dt(
+            deal.get("MOVED_TIME")
+        )
+        if moved_at is not None:
+            result[deal_id] = (
+                (
+                    moved_at
+                    if moved_at <= cutoff
+                    else None
+                ),
+                (
+                    ""
+                    if moved_at <= cutoff
+                    else (
+                        "current_stage_not_valid_at_cutoff"
+                    )
+                ),
+            )
+            continue
+
+        result[deal_id] = (
+            None,
+            "stage_entry_evidence_missing_at_cutoff",
         )
 
-    if observed:
-        occurred, _ = max(
-            observed,
-            key=lambda item: (item[0], item[1]),
-        )
-        return occurred, ""
-
-    moved_at = _dt(deal.get("MOVED_TIME"))
-    if moved_at is not None:
-        if moved_at <= cutoff:
-            return moved_at, ""
-        return None, "current_stage_not_valid_at_cutoff"
-
-    return None, "stage_entry_evidence_missing_at_cutoff"
+    return result
 
 
 def _qualifying_activities(
@@ -479,14 +566,20 @@ def _qualifying_activities(
     return result
 
 
-def _successful_calls(
+def _call_evidence(
     connection: sqlite3.Connection,
     *,
     run_id: int | None,
     candidates: dict[tuple[str, str], frozenset[int]],
-) -> dict[int, list[datetime]]:
+    users: dict[str, dict[str, Any]],
+    start: datetime,
+    end: datetime,
+) -> tuple[
+    dict[int, list[tuple[datetime, str]]],
+    dict[int, list[datetime]],
+]:
     if run_id is None:
-        return {}
+        return {}, {}
 
     activity_owner: dict[str, tuple[str, str]] = {}
 
@@ -512,20 +605,49 @@ def _successful_calls(
                 owner_id,
             )
 
-    result: dict[int, list[datetime]] = {}
+    exact: dict[int, list[tuple[datetime, str]]] = {}
+    ambiguous: dict[int, list[datetime]] = {}
+
+    fact_columns = {
+        str(row["name"])
+        for row in connection.execute(
+            """
+            PRAGMA table_info(
+                rop_voximplant_statistic_facts
+            )
+            """
+        )
+    }
+
+    duration_select = (
+        "call_duration_seconds"
+        if "call_duration_seconds" in fact_columns
+        else "NULL AS call_duration_seconds"
+    )
+    user_select = (
+        "portal_user_id"
+        if "portal_user_id" in fact_columns
+        else "NULL AS portal_user_id"
+    )
+    type_select = (
+        "call_type"
+        if "call_type" in fact_columns
+        else "NULL AS call_type"
+    )
 
     rows = connection.execute(
-        """
+        f"""
         SELECT
             call_start_at,
             crm_activity_id,
             crm_entity_type,
-            crm_entity_id
+            crm_entity_id,
+            {duration_select},
+            {user_select},
+            {type_select}
         FROM rop_voximplant_statistic_facts
-        WHERE last_seen_run_id = ?
-          AND call_failed_code = '200'
+        WHERE call_failed_code = '200'
         """,
-        (run_id,),
     ).fetchall()
 
     for row in rows:
@@ -557,19 +679,54 @@ def _successful_calls(
                 )
             )
 
-        if len(combined) != 1:
+        if not combined:
             continue
 
         occurred = _dt(row["call_start_at"])
-        if occurred is None:
+        if (
+            occurred is None
+            or occurred < start
+            or occurred > end
+        ):
             continue
 
-        deal_id = next(iter(combined))
-        result.setdefault(deal_id, []).append(
-            occurred
+        try:
+            duration = int(
+                row["call_duration_seconds"]
+                or 0
+            )
+        except (TypeError, ValueError):
+            duration = 0
+
+        manager_id = str(
+            row["portal_user_id"]
+            or ""
+        ).strip()
+        call_type = str(
+            row["call_type"]
+            or ""
+        ).strip()
+
+        is_exact = (
+            len(combined) == 1
+            and duration > 0
+            and call_type in {"1", "2"}
+            and manager_id in users
         )
 
-    return result
+        if is_exact:
+            deal_id = next(iter(combined))
+            exact.setdefault(deal_id, []).append(
+                (occurred, manager_id)
+            )
+            continue
+
+        for deal_id in combined:
+            ambiguous.setdefault(deal_id, []).append(
+                occurred
+            )
+
+    return exact, ambiguous
 
 
 def build_b2c_stage_sla_truth(
@@ -596,7 +753,10 @@ def build_b2c_stage_sla_truth(
             "user",
         )
 
-        tracked_deals: dict[int, dict[str, Any]] = {}
+        candidate_deals: dict[
+            int,
+            dict[str, Any],
+        ] = {}
 
         for raw_id, deal in raw_deals.items():
             try:
@@ -611,16 +771,26 @@ def build_b2c_stage_sla_truth(
             if stage_id not in TRACKED_STAGE_IDS:
                 continue
 
-            decision = resolve_policy_scope(
+            candidate_deals[deal_id] = deal
+
+        scope_decisions = (
+            resolve_deal_policy_scopes(
                 database_path,
-                entity_type="deal",
-                entity_id=deal_id,
+                candidate_deals,
             )
-
-            if not decision.eligible:
-                continue
-
-            tracked_deals[deal_id] = deal
+        )
+        tracked_deals = {
+            deal_id: deal
+            for deal_id, deal
+            in candidate_deals.items()
+            if (
+                scope_decisions.get(deal_id)
+                is not None
+                and scope_decisions[
+                    deal_id
+                ].eligible
+            )
+        }
 
         candidates = _candidate_map(tracked_deals)
         chat_map = _resolved_chat_map(
@@ -628,27 +798,14 @@ def build_b2c_stage_sla_truth(
             candidates,
         )
 
-        stage_entries: dict[int, tuple[datetime | None, str]] = {}
+        stage_entries = _stage_entries(
+            connection,
+            deals=tracked_deals,
+            cutoff=cutoff,
+        )
         earliest_entry: datetime | None = None
 
-        for deal_id, deal in tracked_deals.items():
-            stage_id = str(
-                deal.get("STAGE_ID") or ""
-            ).strip()
-
-            entry, blocker = _stage_entry(
-                connection,
-                deal_id=deal_id,
-                deal=deal,
-                stage_id=stage_id,
-                cutoff=cutoff,
-            )
-
-            stage_entries[deal_id] = (
-                entry,
-                blocker,
-            )
-
+        for entry, _blocker in stage_entries.values():
             if entry is not None:
                 earliest_entry = (
                     entry
@@ -670,11 +827,23 @@ def build_b2c_stage_sla_truth(
             end=cutoff,
         )
 
-        calls = _successful_calls(
+        (
+            exact_calls,
+            ambiguous_calls,
+        ) = _call_evidence(
             connection,
             run_id=vox_run_id,
             candidates=candidates,
+            users=users,
+            start=activity_start,
+            end=cutoff,
         )
+
+        for deal_id, call_rows in exact_calls.items():
+            for occurred, _manager_id in call_rows:
+                activities.setdefault(deal_id, []).append(
+                    (occurred, "call")
+                )
 
         rows: list[StageSlaDealTruth] = []
         blocked_reasons: Counter[str] = Counter()
@@ -843,7 +1012,7 @@ def build_b2c_stage_sla_truth(
                 evaluation.anchor_at
                 <= call_at
                 <= cutoff
-                for call_at in calls.get(
+                for call_at in ambiguous_calls.get(
                     deal_id,
                     [],
                 )

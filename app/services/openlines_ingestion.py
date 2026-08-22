@@ -55,7 +55,11 @@ class OpenLinesIngestionResult:
     errors: tuple[tuple[str, int], ...]
 
 
-async def _discover_crm_objects(database_path: str) -> list[CrmObjectCandidate]:
+async def _discover_crm_objects(
+    database_path: str,
+    *,
+    modified_since: str | None = None,
+) -> list[CrmObjectCandidate]:
     async with aiosqlite.connect(database_path) as database:
         cursor = await database.execute(
             """
@@ -72,9 +76,14 @@ async def _discover_crm_objects(database_path: str) -> list[CrmObjectCandidate]:
                     )
                   ) = 'IMOPENLINES_SESSION'
               AND json_extract(payload_json, '$.OWNER_ID') IS NOT NULL
+              AND (
+                    ? IS NULL
+                    OR datetime(source_modified_at) >= datetime(?)
+                  )
             GROUP BY 1, 2
             ORDER BY MAX(CAST(entity_id AS INTEGER)) DESC
-            """
+            """,
+            (modified_since, modified_since),
         )
         rows = await cursor.fetchall()
 
@@ -313,6 +322,7 @@ async def run_openlines_ingestion(
     request_delay_seconds: float = 0.08,
     run_discovery: bool = True,
     run_backfill: bool = True,
+    recent_modified_since: str | None = None,
 ) -> OpenLinesIngestionResult:
     if max_crm_objects < 1:
         raise ValueError("max_crm_objects must be positive")
@@ -339,7 +349,10 @@ async def run_openlines_ingestion(
     if run_discovery:
         await store.seed_discovery_from_existing_links()
 
-        candidates = await _discover_crm_objects(settings.database_path)
+        candidates = await _discover_crm_objects(
+            settings.database_path,
+            modified_since=recent_modified_since,
+        )
 
         for candidate in candidates:
             checkpoint = await store.discovery_checkpoint(
@@ -432,7 +445,13 @@ async def run_openlines_ingestion(
     if run_backfill:
         directory = await load_rop_directory(settings.database_path)
         directory_ids = frozenset(directory.users)
-        chat_ids = await store.list_chat_ids_for_sync(limit=max_chats)
+        if recent_modified_since:
+            chat_ids = await store.list_chat_ids_for_recent_sync(
+                modified_since=recent_modified_since,
+                limit=max_chats,
+            )
+        else:
+            chat_ids = await store.list_chat_ids_for_sync(limit=max_chats)
 
         for chat_id in chat_ids:
             try:

@@ -16,13 +16,12 @@ from app.services.rop_b2c_first_response_truth import (
     build_b2c_first_response_truth,
 )
 from app.services.rop_b2c_stage_sla_truth import (
-    B2CStageSlaTruth,
     STAGE_LABELS,
+    B2CStageSlaTruth,
     build_b2c_stage_sla_truth,
 )
 from app.services.rop_policy_engine import load_policy_contract
 from app.services.rop_policy_scope import CONCIERGE_DEPARTMENT_IDS
-
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -68,6 +67,25 @@ class B2CMvpDashboard:
         if closed <= 0:
             return 0.0
         return 100.0 * self.month_won / closed
+
+
+@dataclass(frozen=True, slots=True)
+class B2CPeriodFlow:
+    window_start: datetime
+    window_end: datetime
+    new_deals: int
+    won: int
+    lost: int
+
+    @property
+    def closed(self) -> int:
+        return self.won + self.lost
+
+    @property
+    def conversion_percent(self) -> float:
+        if self.closed <= 0:
+            return 0.0
+        return 100.0 * self.won / self.closed
 
 
 def _connect(database_path: str) -> sqlite3.Connection:
@@ -251,6 +269,54 @@ def _eligible_deals(
         connection.close()
 
 
+def build_b2c_period_flow(
+    settings: Settings,
+    *,
+    window_start: datetime,
+    window_end: datetime,
+) -> B2CPeriodFlow:
+    if window_start.tzinfo is None or window_end.tzinfo is None:
+        raise ValueError("period boundaries must be timezone-aware")
+
+    start = window_start.astimezone(UTC)
+    end = window_end.astimezone(UTC)
+    if start > end:
+        raise ValueError("window_start must not be after window_end")
+
+    deals, _users = _eligible_deals(settings.database_path)
+    new_deals = 0
+    won = 0
+    lost = 0
+
+    for deal in deals.values():
+        created = _dt(deal.get("DATE_CREATE"))
+        if created is not None and start <= created <= end:
+            new_deals += 1
+
+        semantic = str(
+            deal.get("STAGE_SEMANTIC_ID") or "P"
+        ).strip().upper()
+        if semantic not in {"S", "F"}:
+            continue
+
+        closed = _closed_at(deal)
+        if closed is None or not start <= closed <= end:
+            continue
+
+        if semantic == "S":
+            won += 1
+        else:
+            lost += 1
+
+    return B2CPeriodFlow(
+        window_start=start,
+        window_end=end,
+        new_deals=new_deals,
+        won=won,
+        lost=lost,
+    )
+
+
 def build_b2c_mvp_dashboard(
     settings: Settings,
 ) -> B2CMvpDashboard:
@@ -429,6 +495,104 @@ def _percent(
     if denominator <= 0:
         return 0.0
     return 100.0 * numerator / denominator
+
+
+def format_b2c_mvp_summary(
+    dashboard: B2CMvpDashboard,
+) -> str:
+    """Format the compact Telegram entry point without changing truth math."""
+    fr = dashboard.first_response
+    stage = dashboard.stage_sla
+
+    policy_not_configured = dict(
+        stage.blocked_reasons
+    ).get(
+        "return_to_client_date_not_configured",
+        0,
+    )
+    evidence_blocked = max(
+        0,
+        stage.blocked - policy_not_configured,
+    )
+
+    configured_stages = (
+        row
+        for row in stage.by_stage
+        if row[0] != "C7:FINAL_INVOICE"
+    )
+    top_attention_stage = max(
+        configured_stages,
+        key=lambda row: row[3],
+        default=None,
+    )
+
+    lines = [
+        "ИИ-РОП · B2C",
+        (
+            "Срез данных: "
+            + dashboard.cutoff_at.astimezone(
+                MOSCOW
+            ).strftime("%d.%m.%Y %H:%M МСК")
+        ),
+        "",
+        "Поток месяца",
+        (
+            f"• лиды: {fr.b2c_proven} "
+            f"· новые сделки: {dashboard.month_new_deals}"
+        ),
+        (
+            f"• WON / LOST: {dashboard.month_won} / "
+            f"{dashboard.month_lost} "
+            f"· конверсия {dashboard.closed_conversion_percent:.1f}% "
+            f"(n={dashboard.month_won + dashboard.month_lost})"
+        ),
+        "",
+        "Первый ответ · 15 бизнес-минут",
+        (
+            f"• соблюдение: {fr.ok_share_closed_percent:.1f}% "
+            f"(n={fr.closed_measured})"
+        ),
+        (
+            f"• нарушений: {fr.breach} "
+            f"· недостаточно данных: {fr.blocked}"
+        ),
+        "",
+        "Активные сделки",
+        f"• всего: {dashboard.active_b2c_deals}",
+        (
+            f"• требуют внимания: {stage.attention} "
+            f"· недостаточно данных: {evidence_blocked}"
+        ),
+        f"• SLA пока не настроен: {policy_not_configured}",
+    ]
+
+    if top_attention_stage is not None:
+        stage_id, _, _, attention_count, _ = top_attention_stage
+        if attention_count > 0:
+            lines.extend(
+                [
+                    "",
+                    "Главная проблемная стадия",
+                    (
+                        f"• {STAGE_LABELS.get(stage_id, stage_id)}: "
+                        f"{attention_count} требуют внимания"
+                    ),
+                ]
+            )
+
+    lines.extend(
+        [
+            "",
+            "Подробности — в разделах под сообщением.",
+            (
+                "💬 ИИ-анализ: напишите вопрос обычным сообщением, "
+                "например «Что проверить сегодня?»"
+            ),
+            "Данные: локальная CRM-копия · Bitrix24 не изменяется.",
+        ]
+    )
+
+    return "\n".join(lines)
 
 
 def format_b2c_mvp_dashboard(
@@ -627,7 +791,7 @@ def format_b2c_mvp_dashboard(
                 else "—"
             )
             lines.append(
-                f"• #{item.deal_id} · "
+                f"• Сделка #{item.deal_id} · "
                 f"{item.stage_label} · "
                 f"{item.manager_name} · "
                 f"срок {deadline}"

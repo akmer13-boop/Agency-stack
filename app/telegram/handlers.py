@@ -2,6 +2,7 @@ import logging
 import uuid
 
 from aiogram import F, Router
+from aiogram.enums import ParseMode
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 from aiogram.utils.chat_action import ChatActionSender
@@ -34,6 +35,7 @@ from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import build_main_menu, resolve_user_message, split_telegram_text
 from app.telegram.rate_limit import UserRateLimiter
+from app.telegram.rich_text import render_safe_crm_links_html
 
 logger = logging.getLogger(__name__)
 router = Router(name="agency-stack-telegram")
@@ -92,7 +94,17 @@ async def _require_bitrix_reader(
 
 async def _send_long_text(message: Message, text: str, settings: Settings) -> None:
     for chunk in split_telegram_text(text, settings.telegram_reply_chunk_size):
-        await message.answer(chunk)
+        rich_chunk = render_safe_crm_links_html(
+            chunk,
+            settings,
+        )
+        if rich_chunk is None:
+            await message.answer(chunk)
+        else:
+            await message.answer(
+                rich_chunk,
+                parse_mode=ParseMode.HTML,
+            )
 
 
 async def _report_bitrix_error(
@@ -149,8 +161,10 @@ async def help_handler(
         "Команды Agency Stack:\n"
         "/start — главное меню\n"
         "/help — список команд\n"
+        "/rop — открыть B2C Dashboard ИИ-РОПа\n"
         "/status — статус и роль\n"
         "/bitrix_status — проверить подключение Bitrix24\n"
+        "/bitrix_auto_sync_status — статус автоматического обновления SQLite\n"
         "/bitrix_pipelines — показать воронки\n"
         "/bitrix_stages — показать стадии воронок\n"
         "/bitrix_deals — показать последние тестовые сделки\n"
@@ -504,4 +518,14 @@ async def text_handler(
     )
 
     for chunk in split_telegram_text(result.answer, settings.telegram_reply_chunk_size):
-        await message.answer(chunk)
+        rich_chunk = render_safe_crm_links_html(
+            chunk,
+            settings,
+        )
+        if rich_chunk is None:
+            await message.answer(chunk)
+        else:
+            await message.answer(
+                rich_chunk,
+                parse_mode=ParseMode.HTML,
+            )

@@ -16,6 +16,9 @@ from app.services.rop_voximplant_reconciliation import (
 from app.storage.bitrix_event_store import (
     BitrixEventInboxStore,
 )
+from app.storage.rop_voximplant_reconciliation_store import (
+    RopVoximplantReconciliationStore,
+)
 
 
 class FakeVoximplantClient:
@@ -53,6 +56,8 @@ class FakeVoximplantClient:
                         ),
                         "CALL_FAILED_CODE": "200",
                         "CALL_DURATION": "120",
+                        "CALL_TYPE": "1",
+                        "PORTAL_USER_ID": "55",
                         "CRM_ACTIVITY_ID": "101",
                         "CRM_ENTITY_TYPE": "LEAD",
                         "CRM_ENTITY_ID": "501",
@@ -68,6 +73,8 @@ class FakeVoximplantClient:
                         ),
                         "CALL_FAILED_CODE": "304",
                         "CALL_DURATION": "0",
+                        "CALL_TYPE": "2",
+                        "PORTAL_USER_ID": "56",
                         "CRM_ACTIVITY_ID": "102",
                         "CRM_ENTITY_TYPE": "DEAL",
                         "CRM_ENTITY_ID": "601",
@@ -92,6 +99,8 @@ class FakeVoximplantClient:
                     ),
                     "CALL_FAILED_CODE": "200",
                     "CALL_DURATION": "0",
+                    "CALL_TYPE": "1",
+                    "PORTAL_USER_ID": "57",
                     "CRM_ACTIVITY_ID": "103",
                     "CRM_ENTITY_TYPE": "LEAD",
                     "CRM_ENTITY_ID": "502",
@@ -232,6 +241,7 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
 
     assert result.successful_calls == 2
     assert result.successful_with_duration == 1
+    assert result.policy_candidate_calls == 1
     assert result.crm_linked_calls == 3
 
     assert result.end_event_matches == 3
@@ -275,7 +285,9 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
                 call_id,
                 crm_activity_id,
                 crm_entity_type,
-                crm_entity_id
+                crm_entity_id,
+                portal_user_id,
+                call_type
             FROM rop_voximplant_statistic_facts
             ORDER BY statistic_id
             """
@@ -288,6 +300,8 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
                 "101",
                 "LEAD",
                 "501",
+                "55",
+                "1",
             ),
             (
                 "2",
@@ -295,6 +309,8 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
                 "102",
                 "DEAL",
                 "601",
+                "56",
+                "2",
             ),
             (
                 "3",
@@ -302,8 +318,27 @@ async def test_413a31_reconciles_without_storing_phone_numbers(
                 "103",
                 "LEAD",
                 "502",
+                "57",
+                "1",
             ),
         ]
+
+        coverage = connection.execute(
+            """
+            SELECT
+                window_start,
+                window_end,
+                last_run_id
+            FROM rop_voximplant_coverage
+            WHERE source_key = 'voximplant_statistics'
+            """
+        ).fetchone()
+
+        assert coverage == (
+            "2026-08-21T09:00:00+00:00",
+            "2026-08-21T12:00:00+00:00",
+            result.run_id,
+        )
 
     finally:
         connection.close()
@@ -321,3 +356,72 @@ def test_413a31_sync_client_allows_voximplant_statistics() -> None:
     assert endpoint.endswith(
         "/voximplant.statistic.get.json"
     )
+
+
+@pytest.mark.asyncio
+async def test_m4_6_legacy_runs_do_not_skip_required_backfill(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE rop_voximplant_reconciliation_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            api_total INTEGER NOT NULL,
+            fetched_rows INTEGER NOT NULL,
+            unique_statistic_ids INTEGER NOT NULL,
+            unique_call_ids INTEGER NOT NULL,
+            successful_calls INTEGER NOT NULL,
+            successful_with_duration INTEGER NOT NULL,
+            crm_linked_calls INTEGER NOT NULL,
+            end_event_matches INTEGER NOT NULL,
+            missing_end_events INTEGER NOT NULL,
+            successful_start_matches INTEGER NOT NULL,
+            successful_missing_start_events INTEGER NOT NULL,
+            orphan_start_events INTEGER NOT NULL,
+            orphan_end_events INTEGER NOT NULL,
+            pagination_complete INTEGER NOT NULL,
+            realtime_complete INTEGER NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO rop_voximplant_reconciliation_runs (
+            window_start,
+            window_end,
+            api_total,
+            fetched_rows,
+            unique_statistic_ids,
+            unique_call_ids,
+            successful_calls,
+            successful_with_duration,
+            crm_linked_calls,
+            end_event_matches,
+            missing_end_events,
+            successful_start_matches,
+            successful_missing_start_events,
+            orphan_start_events,
+            orphan_end_events,
+            pagination_complete,
+            realtime_complete
+        )
+        VALUES (
+            '2026-08-01T00:00:00+00:00',
+            '2026-08-20T00:00:00+00:00',
+            1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    store = RopVoximplantReconciliationStore(str(database_path))
+    await store.initialize()
+
+    # Old facts lack the M4.6 user/type evidence. They must not establish
+    # incremental coverage, otherwise the one-time 120-day refetch is skipped.
+    assert await store.get_coverage() is None

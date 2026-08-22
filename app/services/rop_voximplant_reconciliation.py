@@ -29,6 +29,7 @@ class VoximplantReconciliationResult:
     unique_call_ids: int
     successful_calls: int
     successful_with_duration: int
+    policy_candidate_calls: int
     crm_linked_calls: int
     end_event_matches: int
     missing_end_events: int
@@ -159,6 +160,16 @@ def _sanitize(
         crm_entity_id=_text(
             row.get(
                 "CRM_ENTITY_ID"
+            )
+        ),
+        portal_user_id=_text(
+            row.get(
+                "PORTAL_USER_ID"
+            )
+        ),
+        call_type=_text(
+            row.get(
+                "CALL_TYPE"
             )
         ),
     )
@@ -424,6 +435,21 @@ async def reconcile_voximplant_statistics(
         for item in successful
     )
 
+    policy_candidate_calls = sum(
+        item.call_failed_code == "200"
+        and (item.call_duration_seconds or 0) > 0
+        and item.call_type in {"1", "2"}
+        and bool(item.portal_user_id)
+        and bool(
+            item.crm_activity_id
+            or (
+                item.crm_entity_type
+                and item.crm_entity_id
+            )
+        )
+        for item in facts
+    )
+
     crm_linked = sum(
         bool(
             item.crm_activity_id
@@ -536,6 +562,9 @@ async def reconcile_voximplant_statistics(
         successful_with_duration=(
             successful_with_duration
         ),
+        policy_candidate_calls=(
+            policy_candidate_calls
+        ),
         crm_linked_calls=(
             crm_linked
         ),
@@ -580,6 +609,9 @@ async def reconcile_voximplant_statistics(
         ),
         successful_with_duration=(
             successful_with_duration
+        ),
+        policy_candidate_calls=(
+            policy_candidate_calls
         ),
         crm_linked_calls=(
             crm_linked

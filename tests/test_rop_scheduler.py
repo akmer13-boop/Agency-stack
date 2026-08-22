@@ -108,10 +108,37 @@ def test_weekly_scheduler_catches_up_inside_same_week(tmp_path: Path) -> None:
     assert due[0].period_key == "2026-W33"
 
 
+def test_weekly_report_replaces_daily_report_on_monday(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        rop_scheduler_enabled=True,
+        rop_scheduler_daily_enabled=True,
+        rop_scheduler_daily_time="10:00",
+        rop_scheduler_weekly_enabled=True,
+        rop_scheduler_weekly_day="mon",
+        rop_scheduler_weekly_time="10:00",
+        rop_scheduler_recipient_ids="100",
+        telegram_manager_user_ids="100",
+        rop_timezone="Europe/Moscow",
+    )
+    plan = build_rop_scheduler_plan(settings)
+    ledger = RopSchedulerLedger(str(tmp_path / "scheduler.json"))
+    monday = datetime(2026, 8, 24, 10, 0, tzinfo=UTC).astimezone(UTC)
+
+    due = due_rop_scheduler_deliveries(plan, ledger, now=monday)
+
+    assert len(due) == 1
+    assert due[0].job.kind.value == "weekly"
+
+
 def test_scheduler_status_does_not_claim_automatic_defaults() -> None:
     plan = build_rop_scheduler_plan(Settings(_env_file=None))
     text = format_rop_scheduler_plan(plan)
 
     assert "state: disabled" in text
+    assert "daily охватывает предыдущий календарный день" in text
+    assert "прошлый понедельник–воскресенье" in text
     assert "время и получатели не подставляются автоматически" in text
     assert "default state = DISABLED" in text

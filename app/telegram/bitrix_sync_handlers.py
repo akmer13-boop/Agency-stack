@@ -1,5 +1,3 @@
-import asyncio
-
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -28,6 +26,12 @@ from app.services.bitrix24_tombstone_activation import (
     format_tombstone_counts,
     get_tombstone_counts,
 )
+from app.services.bitrix_auto_sync import (
+    bitrix_sync_lock as _sync_lock,
+)
+from app.services.bitrix_auto_sync import (
+    format_bitrix_auto_sync_status,
+)
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
@@ -36,7 +40,6 @@ router = Router(name="bitrix24-sync")
 SYNC_RUN_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER})
 SYNC_STATUS_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER})
 TOMBSTONE_ACTIVATION_ROLES = frozenset({UserRole.ADMIN})
-_sync_lock = asyncio.Lock()
 
 
 def _user_id(message: Message) -> int | None:
@@ -302,3 +305,26 @@ async def bitrix_sync_status_handler(
 
     status, counts = await get_bitrix_sync_status(settings)
     await _send_long_text(message, format_sync_status(status, counts), settings)
+
+
+@router.message(Command("bitrix_auto_sync_status"))
+async def bitrix_auto_sync_status_handler(
+    message: Message,
+    settings: Settings,
+    conversation_store: ConversationStore,
+) -> None:
+    user_id = _user_id(message)
+    if not is_telegram_user_allowed(user_id, settings):
+        await message.answer("Доступ к Agency Stack не предоставлен.")
+        return
+
+    role = await _sync_user(message, settings, conversation_store)
+    if role not in SYNC_STATUS_ROLES:
+        await message.answer("Статус auto-sync недоступен для вашей роли.")
+        return
+
+    await _send_long_text(
+        message,
+        format_bitrix_auto_sync_status(settings),
+        settings,
+    )

@@ -249,8 +249,24 @@ def due_rop_scheduler_deliveries(
 
     local_now = now.astimezone(ZoneInfo(plan.timezone_name))
     deliveries: list[RopScheduledDelivery] = []
+    weekly_replacement_days = {
+        job.weekday
+        for job in plan.jobs
+        if (
+            job.kind is RopSchedulerJobKind.WEEKLY
+            and job.weekday is not None
+        )
+    }
 
     for job in plan.jobs:
+        if (
+            job.kind is RopSchedulerJobKind.DAILY
+            and local_now.weekday() in weekly_replacement_days
+        ):
+            # The weekly report covers the previous Monday through Sunday,
+            # so it replaces the daily report on its configured weekday.
+            continue
+
         if not _job_is_due(job, local_now):
             continue
 
@@ -296,6 +312,11 @@ def format_rop_scheduler_plan(plan: RopSchedulerPlan) -> str:
             "",
             "Безопасность:",
             "• scheduler отправляет только уже детерминированные read-only отчёты;",
+            "• daily охватывает предыдущий календарный день;",
+            (
+                "• weekly охватывает прошлый понедельник–воскресенье "
+                "и заменяет daily в день weekly-отчёта;"
+            ),
             "• CRM write не используется;",
             "• время и получатели не подставляются автоматически;",
             "• default state = DISABLED;",

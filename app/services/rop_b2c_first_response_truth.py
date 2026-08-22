@@ -13,8 +13,21 @@ from app.services.rop_business_time import (
     evaluate_first_response,
 )
 from app.services.rop_policy_scope import (
-    resolve_policy_scope,
+    resolve_lead_policy_scopes,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class B2CFirstResponseBreachTruth:
+    """Exact, privacy-safe evidence for one truthful First Response breach."""
+
+    lead_id: int
+    manager_id: str | None
+    created_at: datetime
+    response_at: datetime | None
+    deadline_at: datetime
+    threshold_business_seconds: int
+    elapsed_business_seconds: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +49,7 @@ class B2CFirstResponseTruth:
     vox_run_id: int | None
     vox_window_start: datetime | None
     vox_window_end: datetime | None
+    breach_leads: tuple[B2CFirstResponseBreachTruth, ...] = ()
 
     @property
     def closed_measured(self) -> int:
@@ -111,6 +125,7 @@ def build_b2c_first_response_truth(
     database_path: str,
     *,
     now: datetime | None = None,
+    window_start: datetime | None = None,
 ) -> B2CFirstResponseTruth:
     observed_at = (
         now or datetime.now(UTC)
@@ -124,16 +139,24 @@ def build_b2c_first_response_truth(
         moscow
     )
 
-    month_start = (
-        local_now.replace(
-            day=1,
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
+    if window_start is None:
+        period_start = (
+            local_now.replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            .astimezone(UTC)
         )
-        .astimezone(UTC)
-    )
+    else:
+        if window_start.tzinfo is None:
+            raise ValueError("window_start must be timezone-aware")
+        period_start = window_start.astimezone(UTC)
+
+    if period_start > observed_at:
+        raise ValueError("window_start must not be after now")
 
     connection = _connect(
         database_path
@@ -185,7 +208,7 @@ def build_b2c_first_response_truth(
                 continue
 
             if not (
-                month_start
+                period_start
                 <= created
                 <= observed_at
             ):
@@ -204,15 +227,24 @@ def build_b2c_first_response_truth(
             dict[str, object],
         ] = {}
 
+        scope_decisions = (
+            resolve_lead_policy_scopes(
+                database_path,
+                leads,
+            )
+        )
+
         for (
             lead_id,
             lead,
         ) in leads.items():
-            decision = resolve_policy_scope(
-                database_path,
-                entity_type="lead",
-                entity_id=lead_id,
+            decision = scope_decisions.get(
+                lead_id
             )
+
+            if decision is None:
+                scope["unresolved"] += 1
+                continue
 
             if decision.eligible:
                 scope["b2c"] += 1
@@ -537,6 +569,9 @@ def build_b2c_first_response_truth(
             if sent is None:
                 continue
 
+            if sent > observed_at:
+                continue
+
             for lead_id in resolved_chat_leads.get(
                 chat_id,
                 set(),
@@ -610,7 +645,27 @@ def build_b2c_first_response_truth(
         vox_start = None
         vox_end = None
 
+        if "rop_voximplant_coverage" in tables:
+            row = connection.execute(
+                """
+                SELECT
+                    last_run_id,
+                    window_start,
+                    window_end
+                FROM rop_voximplant_coverage
+                WHERE source_key = 'voximplant_statistics'
+                LIMIT 1
+                """
+            ).fetchone()
+
+            if row is not None:
+                vox_run_id = int(row["last_run_id"])
+                vox_start = _dt(row["window_start"])
+                vox_end = _dt(row["window_end"])
+
         if (
+            vox_run_id is None
+            and
             "rop_voximplant_reconciliation_runs"
             in tables
         ):
@@ -777,24 +832,79 @@ def build_b2c_first_response_truth(
 
             return set()
 
-        calls_by_lead: dict[int, list[datetime]] = {}
+        directory_user_ids = {
+            str(row["entity_id"])
+            for row in connection.execute(
+                """
+                SELECT entity_id
+                FROM crm_active_entities
+                WHERE entity_type = 'user'
+                """
+            )
+        }
+
+        exact_calls_by_lead: defaultdict[
+            int,
+            list[tuple[datetime, str]],
+        ] = defaultdict(list)
+
+        ambiguous_calls_by_lead: defaultdict[
+            int,
+            list[datetime],
+        ] = defaultdict(list)
+
+        evidence_end = (
+            min(vox_end, observed_at)
+            if vox_end is not None
+            else None
+        )
 
         if (
             vox_run_id is not None
+            and vox_start is not None
+            and evidence_end is not None
             and "rop_voximplant_statistic_facts" in tables
         ):
+            fact_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    """
+                    PRAGMA table_info(
+                        rop_voximplant_statistic_facts
+                    )
+                    """
+                )
+            }
+
+            duration_select = (
+                "call_duration_seconds"
+                if "call_duration_seconds" in fact_columns
+                else "NULL AS call_duration_seconds"
+            )
+            user_select = (
+                "portal_user_id"
+                if "portal_user_id" in fact_columns
+                else "NULL AS portal_user_id"
+            )
+            type_select = (
+                "call_type"
+                if "call_type" in fact_columns
+                else "NULL AS call_type"
+            )
+
             call_rows = connection.execute(
-                """
+                f"""
                 SELECT
                     call_start_at,
                     crm_activity_id,
                     crm_entity_type,
-                    crm_entity_id
+                    crm_entity_id,
+                    {duration_select},
+                    {user_select},
+                    {type_select}
                 FROM rop_voximplant_statistic_facts
-                WHERE last_seen_run_id = ?
-                  AND call_failed_code = '200'
+                WHERE call_failed_code = '200'
                 """,
-                (vox_run_id,),
             ).fetchall()
 
             for row in call_rows:
@@ -827,14 +937,73 @@ def build_b2c_first_response_truth(
                 if started is None:
                     continue
 
-                # Conservative evidence rule:
-                # if one successful call can plausibly belong to several
-                # B2C leads, protect every candidate from a false breach.
+                if (
+                    started < vox_start
+                    or started > evidence_end
+                ):
+                    continue
+
+                try:
+                    duration = int(
+                        row["call_duration_seconds"]
+                        or 0
+                    )
+                except (TypeError, ValueError):
+                    duration = 0
+
+                manager_id = str(
+                    row["portal_user_id"]
+                    or ""
+                ).strip()
+                call_type = str(
+                    row["call_type"]
+                    or ""
+                ).strip()
+
+                exact = (
+                    len(candidates) == 1
+                    and duration > 0
+                    and call_type in {"1", "2"}
+                    and manager_id in directory_user_ids
+                )
+
+                if exact:
+                    lead_id = next(iter(candidates))
+                    exact_calls_by_lead[lead_id].append(
+                        (started, manager_id)
+                    )
+                    continue
+
+                # A successful but incomplete/ambiguous call still protects
+                # every plausible lead from a false breach.
                 for lead_id in candidates:
-                    calls_by_lead.setdefault(
-                        lead_id,
-                        [],
-                    ).append(started)
+                    ambiguous_calls_by_lead[lead_id].append(
+                        started
+                    )
+
+        for lead_id, calls in exact_calls_by_lead.items():
+            lead = b2c_leads.get(lead_id)
+            if lead is None:
+                continue
+            created = lead.get("created")
+            if not isinstance(created, datetime):
+                continue
+
+            eligible_calls = [
+                item
+                for item in calls
+                if item[0] >= created
+            ]
+            if not eligible_calls:
+                continue
+
+            exact_call = min(
+                eligible_calls,
+                key=lambda item: (item[0], item[1]),
+            )
+            current = first_message.get(lead_id)
+            if current is None or exact_call[0] < current[0]:
+                first_message[lead_id] = exact_call
 
         result = Counter()
 
@@ -843,6 +1012,10 @@ def build_b2c_first_response_truth(
         breach_managers = Counter()
 
         unattributed_breaches = 0
+
+        breach_leads: list[
+            B2CFirstResponseBreachTruth
+        ] = []
 
         for (
             lead_id,
@@ -884,9 +1057,9 @@ def build_b2c_first_response_truth(
 
                 coverage_full = (
                     vox_start is not None
-                    and vox_end is not None
+                    and evidence_end is not None
                     and created >= vox_start
-                    and response_at <= vox_end
+                    and response_at <= evidence_end
                 )
 
                 if not coverage_full:
@@ -923,7 +1096,7 @@ def build_b2c_first_response_truth(
                     <= call_start
                     <= response_at
                     for call_start
-                    in calls_by_lead.get(
+                    in ambiguous_calls_by_lead.get(
                         lead_id,
                         [],
                     )
@@ -944,13 +1117,31 @@ def build_b2c_first_response_truth(
                     manager_id
                 ] += 1
 
+                breach_leads.append(
+                    B2CFirstResponseBreachTruth(
+                        lead_id=lead_id,
+                        manager_id=manager_id,
+                        created_at=created,
+                        response_at=response_at,
+                        deadline_at=(
+                            evaluation.deadline_at
+                        ),
+                        threshold_business_seconds=(
+                            evaluation.threshold_business_seconds
+                        ),
+                        elapsed_business_seconds=(
+                            evaluation.elapsed_business_seconds
+                        ),
+                    )
+                )
+
                 continue
 
             coverage_full = (
                 vox_start is not None
-                and vox_end is not None
+                and evidence_end is not None
                 and created >= vox_start
-                and created <= vox_end
+                and created <= evidence_end
             )
 
             if not coverage_full:
@@ -965,7 +1156,7 @@ def build_b2c_first_response_truth(
             ambiguous_message = any(
                 created
                 <= message_at
-                <= vox_end
+                <= evidence_end
                 for message_at in
                 ambiguous_messages_by_lead.get(
                     lead_id,
@@ -985,9 +1176,9 @@ def build_b2c_first_response_truth(
             ambiguous_call = any(
                 created
                 <= call_start
-                <= vox_end
+                <= evidence_end
                 for call_start
-                in calls_by_lead.get(
+                    in ambiguous_calls_by_lead.get(
                     lead_id,
                     [],
                 )
@@ -1005,7 +1196,7 @@ def build_b2c_first_response_truth(
             evaluation = (
                 evaluate_first_response(
                     lead_created_at=created,
-                    as_of=vox_end,
+                    as_of=evidence_end,
                 )
             )
 
@@ -1019,6 +1210,24 @@ def build_b2c_first_response_truth(
                 # Do not blame the current assignee.
                 unattributed_breaches += 1
 
+                breach_leads.append(
+                    B2CFirstResponseBreachTruth(
+                        lead_id=lead_id,
+                        manager_id=None,
+                        created_at=created,
+                        response_at=None,
+                        deadline_at=(
+                            evaluation.deadline_at
+                        ),
+                        threshold_business_seconds=(
+                            evaluation.threshold_business_seconds
+                        ),
+                        elapsed_business_seconds=(
+                            evaluation.elapsed_business_seconds
+                        ),
+                    )
+                )
+
             else:
                 result["open"] += 1
 
@@ -1029,7 +1238,7 @@ def build_b2c_first_response_truth(
         )
 
         return B2CFirstResponseTruth(
-            window_start=month_start,
+            window_start=period_start,
             window_end=observed_at,
             all_leads_created=len(
                 leads
@@ -1058,6 +1267,9 @@ def build_b2c_first_response_truth(
             vox_run_id=vox_run_id,
             vox_window_start=vox_start,
             vox_window_end=vox_end,
+            breach_leads=tuple(
+                breach_leads
+            ),
         )
 
     finally:

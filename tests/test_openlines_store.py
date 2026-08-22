@@ -3,6 +3,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
+from app.storage.crm_store import CrmStore
 from app.storage.openlines_store import OpenLinesStore
 
 
@@ -243,3 +244,79 @@ async def test_chat_sync_state_tracks_resumable_bounds(tmp_path: Path) -> None:
     assert state.stored_message_count == 3
     assert state.pages_loaded == 2
     assert state.backfill_complete is True
+
+
+@pytest.mark.asyncio
+async def test_recent_sync_selects_only_chats_touched_in_incremental_window(
+    tmp_path: Path,
+) -> None:
+    database_path = str(tmp_path / "agency.db")
+    crm_store = CrmStore(database_path)
+    openlines_store = OpenLinesStore(database_path)
+    await crm_store.initialize()
+    await openlines_store.initialize()
+
+    await crm_store.upsert_entities(
+        "lead",
+        [
+            {
+                "ID": "1",
+                "DATE_MODIFY": "2026-08-22T10:05:00+00:00",
+            },
+            {
+                "ID": "2",
+                "DATE_MODIFY": "2026-08-22T09:00:00+00:00",
+            },
+            {
+                "ID": "3",
+                "DATE_MODIFY": "2026-08-22T09:00:00+00:00",
+            },
+        ],
+        modified_field="DATE_MODIFY",
+    )
+    await crm_store.upsert_entities(
+        "activity",
+        [
+            {
+                "ID": "900",
+                "OWNER_TYPE_ID": "1",
+                "OWNER_ID": "3",
+                "PROVIDER_ID": "IMOPENLINES_SESSION",
+                "LAST_UPDATED": "2026-08-22T10:06:00+00:00",
+            }
+        ],
+        modified_field="LAST_UPDATED",
+    )
+
+    for chat_id, lead_id in (
+        ("101", "1"),
+        ("102", "2"),
+        ("103", "3"),
+        ("104", "2"),
+    ):
+        await openlines_store.upsert_chat_link(
+            {"CHAT_ID": chat_id},
+            entity_type="lead",
+            entity_id=lead_id,
+        )
+
+    async with aiosqlite.connect(database_path) as database:
+        await database.execute(
+            "UPDATE openlines_chats SET synced_at = '2026-08-22 09:00:00'"
+        )
+        await database.execute(
+            """
+            UPDATE openlines_chats
+            SET synced_at = '2026-08-22 10:07:00'
+            WHERE chat_id = '104'
+            """
+        )
+        await database.commit()
+
+    selected = await openlines_store.list_chat_ids_for_recent_sync(
+        modified_since="2026-08-22T10:00:00+00:00",
+        limit=10,
+    )
+
+    assert selected == ["104", "103", "101"]
+    assert "102" not in selected

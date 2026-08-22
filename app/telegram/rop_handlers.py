@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from aiogram import Router
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 from aiogram.utils.chat_action import ChatActionSender
@@ -71,6 +72,7 @@ from app.services.rop_scheduler_health import (
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.messages import split_telegram_text
+from app.telegram.rich_text import render_safe_crm_links_html
 
 router = Router(name="rop-analytics")
 ROP_READ_ROLES = frozenset({UserRole.ADMIN, UserRole.MANAGER, UserRole.OBSERVER})
@@ -107,7 +109,17 @@ async def _authorize(
 
 async def _send_long_text(message: Message, text: str, settings: Settings) -> None:
     for chunk in split_telegram_text(text, settings.telegram_reply_chunk_size):
-        await message.answer(chunk)
+        rich_chunk = render_safe_crm_links_html(
+            chunk,
+            settings,
+        )
+        if rich_chunk is None:
+            await message.answer(chunk)
+        else:
+            await message.answer(
+                rich_chunk,
+                parse_mode=ParseMode.HTML,
+            )
 
 
 async def _with_local_identities(text: str, settings: Settings) -> str:
@@ -397,7 +409,11 @@ async def rop_deal_handler(
             build_deal_vitality(report, risk) if report is not None and risk is not None else None
         )
     if report is None or evidence is None or risk is None or vitality is None:
-        await message.answer(f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.")
+        await _send_long_text(
+            message,
+            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.",
+            settings,
+        )
         return
 
     base_text = format_deal_drilldown(
@@ -453,7 +469,11 @@ async def rop_deal_activity_handler(
             await build_recent_deal_activity(settings, report, days) if report is not None else None
         )
     if report is None or activity is None:
-        await message.answer(f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.")
+        await _send_long_text(
+            message,
+            f"Сделка #{deal_id} не найдена в локальной синхронизированной CRM.",
+            settings,
+        )
         return
 
     text = format_recent_deal_activity(

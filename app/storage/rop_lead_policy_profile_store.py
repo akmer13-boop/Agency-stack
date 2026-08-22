@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,6 +114,152 @@ class RopLeadPolicyProfileStore:
             first_resolved_at=str(row["first_resolved_at"]),
             last_confirmed_at=str(row["last_confirmed_at"]),
         )
+
+    def get_many(
+        self,
+        lead_ids: Iterable[int],
+    ) -> dict[int, StoredLeadPolicyProfile]:
+        normalized = tuple(
+            sorted(
+                {
+                    lead_id
+                    for lead_id in lead_ids
+                    if lead_id > 0
+                }
+            )
+        )
+
+        if not normalized:
+            return {}
+
+        self.initialize()
+        connection = self._connect()
+
+        try:
+            rows: list[sqlite3.Row] = []
+
+            for offset in range(
+                0,
+                len(normalized),
+                500,
+            ):
+                chunk = normalized[
+                    offset : offset + 500
+                ]
+                placeholders = ",".join(
+                    "?" for _item in chunk
+                )
+                rows.extend(
+                    connection.execute(
+                        f"""
+                        SELECT
+                            lead_id,
+                            profile_key,
+                            evidence_kind,
+                            evidence_ref,
+                            first_resolved_at,
+                            last_confirmed_at
+                        FROM rop_lead_policy_profile
+                        WHERE lead_id IN ({placeholders})
+                        """,
+                        chunk,
+                    ).fetchall()
+                )
+
+        finally:
+            connection.close()
+
+        return {
+            int(row["lead_id"]): StoredLeadPolicyProfile(
+                lead_id=int(row["lead_id"]),
+                profile_key=str(row["profile_key"]),
+                evidence_kind=str(row["evidence_kind"]),
+                evidence_ref=str(row["evidence_ref"]),
+                first_resolved_at=str(row["first_resolved_at"]),
+                last_confirmed_at=str(row["last_confirmed_at"]),
+            )
+            for row in rows
+        }
+
+    def confirm_many_tourism_b2c(
+        self,
+        confirmations: Iterable[
+            tuple[int, str, str]
+        ],
+    ) -> int:
+        normalized: dict[
+            int,
+            tuple[str, str],
+        ] = {}
+
+        for (
+            lead_id,
+            evidence_kind,
+            evidence_ref,
+        ) in confirmations:
+            if lead_id <= 0:
+                raise ValueError("lead_id_invalid")
+
+            normalized[lead_id] = (
+                (
+                    evidence_kind.strip()
+                    or "unknown"
+                )[:80],
+                (
+                    evidence_ref.strip()
+                    or "unknown"
+                )[:160],
+            )
+
+        if not normalized:
+            return 0
+
+        self.initialize()
+        connection = self._connect()
+
+        try:
+            connection.executemany(
+                """
+                INSERT INTO
+                    rop_lead_policy_profile (
+                        lead_id,
+                        profile_key,
+                        evidence_kind,
+                        evidence_ref
+                    )
+                VALUES (
+                    ?,
+                    'tourism_b2c',
+                    ?,
+                    ?
+                )
+                ON CONFLICT (lead_id)
+                DO UPDATE SET
+                    profile_key =
+                        'tourism_b2c',
+                    evidence_kind =
+                        excluded.evidence_kind,
+                    evidence_ref =
+                        excluded.evidence_ref,
+                    last_confirmed_at =
+                        CURRENT_TIMESTAMP
+                """,
+                (
+                    (
+                        lead_id,
+                        evidence[0],
+                        evidence[1],
+                    )
+                    for lead_id, evidence
+                    in normalized.items()
+                ),
+            )
+            connection.commit()
+
+        finally:
+            connection.close()
+
+        return len(normalized)
 
     def confirm_tourism_b2c(
         self,

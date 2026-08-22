@@ -532,7 +532,7 @@ def format_rop_risks(snapshot: RopSnapshot) -> str:
     for risk in snapshot.risks:
         amount = _money(risk.opportunity)
         lines.append(
-            f"• #{risk.deal_id} | {risk.idle_days} дн. | "
+            f"• Сделка #{risk.deal_id} | {risk.idle_days} дн. | "
             f"{category_label(risk.category_id)} | {stage_label(risk.stage_id)}\n"
             f"  {amount} {risk.currency} | ответственный ID {risk.assigned_by_id}"
         )

@@ -9,13 +9,12 @@ from datetime import UTC, datetime
 from functools import partial
 
 from aiogram import Bot
+from aiogram.enums import ParseMode
 
 from app.config import Settings
-from app.services.rop_analytics import build_rop_snapshot, format_rop_week
-from app.services.rop_daily import build_rop_daily
+from app.services.rop_calendar_report import build_rop_calendar_report
 from app.services.rop_scheduler import (
     RopScheduledDelivery,
-    RopSchedulerJobKind,
     RopSchedulerLedger,
     RopSchedulerState,
     build_rop_scheduler_plan,
@@ -23,6 +22,7 @@ from app.services.rop_scheduler import (
 )
 from app.services.rop_scheduler_health import RopSchedulerHealthStore
 from app.telegram.messages import split_telegram_text
+from app.telegram.rich_text import render_safe_crm_links_html
 
 logger = logging.getLogger(__name__)
 
@@ -51,26 +51,15 @@ class RopSchedulerTickResult:
     failed: int
 
 
-async def _build_weekly_report(settings: Settings) -> str:
-    snapshot = await build_rop_snapshot(
-        settings.database_path,
-        attention_days=settings.rop_attention_days,
-        critical_days=settings.rop_critical_days,
-        risk_limit=settings.rop_risk_limit,
-        timezone_name=settings.rop_timezone,
-        included_category_ids=settings.rop_included_categories,
-        excluded_stage_ids=settings.rop_excluded_stages,
-    )
-    return format_rop_week(snapshot)
-
-
 async def _build_report(
     delivery: RopScheduledDelivery,
     settings: Settings,
 ) -> str:
-    if delivery.job.kind is RopSchedulerJobKind.DAILY:
-        return await build_rop_daily(settings)
-    return await _build_weekly_report(settings)
+    return build_rop_calendar_report(
+        settings,
+        kind=delivery.job.kind,
+        period_key=delivery.period_key,
+    )
 
 
 async def _send_report(
@@ -80,7 +69,21 @@ async def _send_report(
     settings: Settings,
 ) -> None:
     for chunk in split_telegram_text(text, settings.telegram_reply_chunk_size):
-        await bot.send_message(chat_id=recipient_id, text=chunk)
+        rich_chunk = render_safe_crm_links_html(
+            chunk,
+            settings,
+        )
+        if rich_chunk is None:
+            await bot.send_message(
+                chat_id=recipient_id,
+                text=chunk,
+            )
+        else:
+            await bot.send_message(
+                chat_id=recipient_id,
+                text=rich_chunk,
+                parse_mode=ParseMode.HTML,
+            )
 
 
 async def run_rop_scheduler_tick(

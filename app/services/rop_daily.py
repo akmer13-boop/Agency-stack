@@ -225,7 +225,8 @@ async def build_rop_daily(settings: Settings) -> str:
             if context is not None:
                 vitality_suffix = " | " + format_deal_vitality_compact(context[1])
             lines.append(
-                f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
+                f"• [{severity}] Сделка #{item.deal_id} | "
+                f"{category_label(item.category_id)} · "
                 f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
                 f"{_money(item.opportunity)} {item.currency} | "
                 f"{_responsible_label(directory, item.assigned_by_id)}{vitality_suffix}"
@@ -240,7 +241,10 @@ async def build_rop_daily(settings: Settings) -> str:
                 if context is None:
                     continue
                 risk, vitality = context
-                lines.append(f"• #{item.deal_id} | {format_activity_aware_risk_compact(risk)}")
+                lines.append(
+                    f"• Сделка #{item.deal_id} | "
+                    f"{format_activity_aware_risk_compact(risk)}"
+                )
                 lines.append(f"  {format_deal_vitality_compact(vitality)}")
         lines.append(
             "• дни с последней коммуникации являются фактом, а не отдельным SLA: "
@@ -324,7 +328,7 @@ async def build_rop_daily(settings: Settings) -> str:
     )
     for item in hygiene[:3]:
         lines.append(
-            f"• #{item.deal_id} | {category_label(item.category_id)} · "
+            f"• Сделка #{item.deal_id} | {category_label(item.category_id)} · "
             f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
             f"{_responsible_label(directory, item.assigned_by_id)}"
         )

@@ -27,9 +27,11 @@ def test_rop_function_tools_are_read_only_analytics_surface() -> None:
         "get_rop_sla",
         "get_rop_cycle_time",
         "get_rop_focus",
+        "get_rop_b2c_today_focus",
         "get_rop_deal",
         "get_rop_deal_activity",
         "get_rop_leads",
+        "get_rop_b2c_problem_cards",
         "get_rop_lead_response_evidence",
         "get_rop_openlines_response",
         "get_rop_lead_response_trend",
@@ -57,9 +59,11 @@ def test_manager_agent_receives_rop_tools() -> None:
     assert "get_rop_sla" in names
     assert "get_rop_cycle_time" in names
     assert "get_rop_focus" in names
+    assert "get_rop_b2c_today_focus" in names
     assert "get_rop_deal" in names
     assert "get_rop_deal_activity" in names
     assert "get_rop_leads" in names
+    assert "get_rop_b2c_problem_cards" in names
     assert "get_rop_lead_response_evidence" in names
     assert "get_rop_openlines_response" in names
     assert "get_rop_lead_response_trend" in names
@@ -126,6 +130,29 @@ def test_manager_agent_routes_lead_questions_to_lead_intelligence() -> None:
     assert "используй get_rop_first_response_policy" in agent.instructions
     assert "Статус READY означает только готовность конфигурации" in agent.instructions
     assert "ID→ФИО" in agent.instructions
+
+
+def test_manager_agent_routes_exact_b2c_cards_without_export() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "обязательно используй get_rop_b2c_problem_cards" in agent.instructions
+    assert "Для ссылок именно на лиды передай scope=leads" in agent.instructions
+    assert "Не подменяй его get_rop_leads" in agent.instructions
+    assert "Не проси экспорт" in agent.instructions
+    assert "Сохраняй полученные tool-ссылки" in agent.instructions
+    assert "не приписывай менеджерам First Response нарушения" in agent.instructions
+
+
+def test_manager_agent_routes_today_focus_to_clean_b2c_tool() -> None:
+    settings = Settings(_env_file=None)
+    agent = _prepare_agent(AgentRoute.SALES_MANAGER, UserRole.MANAGER, settings)
+    assert isinstance(agent.instructions, str)
+    assert "обязательно используй get_rop_b2c_today_focus" in agent.instructions
+    assert "Не подменяй его legacy-инструментом get_rop_focus" in agent.instructions
+    assert "он смешивает B2B/B2C" in agent.instructions
+    assert "не показывай CATEGORY_ID/STAGE_ID" in agent.instructions
+    assert "слово 'КРИТИЧНО'" in agent.instructions
 
 
 def test_manager_agent_routes_weekend_customer_question_without_clarification() -> None:

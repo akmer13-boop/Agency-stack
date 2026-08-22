@@ -9,6 +9,9 @@ from app.config import get_settings
 from app.observability import configure_logging
 from app.proxy import build_proxy_url
 from app.runtime import configure_openai_runtime
+from app.services.bitrix_auto_sync import (
+    run_bitrix_auto_sync_worker,
+)
 from app.storage.conversation_store import ConversationStore
 from app.storage.crm_store import CrmStore
 from app.telegram.bitrix_inventory_handlers import router as bitrix_inventory_router
@@ -17,6 +20,7 @@ from app.telegram.handlers import router
 from app.telegram.rate_limit import UserRateLimiter
 from app.telegram.rop_handlers import router as rop_router
 from app.telegram.rop_lead_handlers import router as rop_lead_router
+from app.telegram.rop_mvp_dashboard_handlers import router as rop_mvp_dashboard_router
 from app.telegram.rop_scheduler import run_rop_scheduler
 
 logger = logging.getLogger(__name__)
@@ -64,6 +68,7 @@ async def run_telegram_bot() -> None:
     dispatcher = Dispatcher()
     dispatcher.include_router(bitrix_inventory_router)
     dispatcher.include_router(bitrix_sync_router)
+    dispatcher.include_router(rop_mvp_dashboard_router)
     dispatcher.include_router(rop_router)
     dispatcher.include_router(rop_lead_router)
     dispatcher.include_router(router)
@@ -81,6 +86,10 @@ async def run_telegram_bot() -> None:
         run_rop_scheduler(bot, settings),
         name="rop-scheduler",
     )
+    auto_sync_task = asyncio.create_task(
+        run_bitrix_auto_sync_worker(settings),
+        name="bitrix-auto-sync",
+    )
     try:
         await dispatcher.start_polling(
             bot,
@@ -92,9 +101,17 @@ async def run_telegram_bot() -> None:
             allowed_updates=dispatcher.resolve_used_update_types(),
         )
     finally:
-        scheduler_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await scheduler_task
+        for task in (
+            scheduler_task,
+            auto_sync_task,
+        ):
+            task.cancel()
+        for task in (
+            scheduler_task,
+            auto_sync_task,
+        ):
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 def main() -> None:
