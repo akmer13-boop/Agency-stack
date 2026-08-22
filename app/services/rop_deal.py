@@ -624,7 +624,7 @@ def format_deal_for_ai(
     category_stage = f"{category_label(report.category_id)} · {stage_label(report.stage_id)}"
     stage_age = report.stage_age_days if report.stage_age_days is not None else "—"
     lines = [
-        f"ИИ-РОП · compact deal facts #{report.deal_id}",
+        f"ИИ-РОП · Сделка #{report.deal_id} · compact facts",
         f"Воронка/стадия: {category_stage}",
         f"Сумма: {_money(report.opportunity)} {report.currency}",
         f"Ответственный: {_employee(report.directory, report.assigned_by_id)}",

@@ -1157,6 +1157,124 @@ class OpenLinesStore:
             rows = await cursor.fetchall()
         return [str(row[0]) for row in rows]
 
+    async def list_chat_ids_for_recent_sync(
+        self,
+        *,
+        modified_since: str,
+        limit: int,
+    ) -> list[str]:
+        """Return chats linked to CRM objects changed in one incremental window.
+
+        The selection is intentionally bounded. It includes direct changes to
+        lead/deal/contact/company, owners of recently updated Open Lines CRM
+        activities, and chats rediscovered during the current window. It does
+        not use the historical backfill queue as a fallback.
+        """
+        if limit < 1:
+            return []
+        threshold = modified_since.strip()
+        if not threshold:
+            raise ValueError("modified_since must not be empty")
+
+        async with aiosqlite.connect(self.database_path) as database:
+            await _prepare_connection(database)
+            cursor = await database.execute(
+                """
+                WITH recent_entities AS (
+                    SELECT
+                        entity_type,
+                        entity_id,
+                        MAX(source_modified_at) AS changed_at
+                    FROM crm_active_entities
+                    WHERE entity_type IN (
+                            'lead',
+                            'deal',
+                            'contact',
+                            'company'
+                        )
+                      AND source_modified_at IS NOT NULL
+                      AND datetime(source_modified_at) >= datetime(?)
+                    GROUP BY entity_type, entity_id
+                ),
+                recent_activity_owners AS (
+                    SELECT
+                        CASE CAST(
+                            json_extract(payload_json, '$.OWNER_TYPE_ID')
+                            AS TEXT
+                        )
+                            WHEN '1' THEN 'lead'
+                            WHEN '2' THEN 'deal'
+                            WHEN '3' THEN 'contact'
+                            WHEN '4' THEN 'company'
+                            ELSE NULL
+                        END AS entity_type,
+                        CAST(
+                            json_extract(payload_json, '$.OWNER_ID')
+                            AS TEXT
+                        ) AS entity_id,
+                        MAX(source_modified_at) AS changed_at
+                    FROM crm_active_entities
+                    WHERE entity_type = 'activity'
+                      AND UPPER(
+                            COALESCE(
+                                CAST(
+                                    json_extract(
+                                        payload_json,
+                                        '$.PROVIDER_ID'
+                                    ) AS TEXT
+                                ),
+                                ''
+                            )
+                          ) = 'IMOPENLINES_SESSION'
+                      AND source_modified_at IS NOT NULL
+                      AND datetime(source_modified_at) >= datetime(?)
+                      AND json_extract(payload_json, '$.OWNER_ID') IS NOT NULL
+                    GROUP BY 1, 2
+                ),
+                recent_crm_objects AS (
+                    SELECT entity_type, entity_id, changed_at
+                    FROM recent_entities
+                    UNION ALL
+                    SELECT entity_type, entity_id, changed_at
+                    FROM recent_activity_owners
+                    WHERE entity_type IS NOT NULL
+                      AND entity_id IS NOT NULL
+                ),
+                candidates AS (
+                    SELECT
+                        link.chat_id,
+                        recent.changed_at
+                    FROM recent_crm_objects AS recent
+                    JOIN openlines_crm_links AS link
+                      ON link.entity_type = recent.entity_type
+                     AND link.entity_id = recent.entity_id
+
+                    UNION ALL
+
+                    SELECT
+                        chat.chat_id,
+                        chat.synced_at AS changed_at
+                    FROM openlines_chats AS chat
+                    WHERE datetime(chat.synced_at) >= datetime(?)
+                )
+                SELECT chat_id
+                FROM candidates
+                GROUP BY chat_id
+                ORDER BY
+                    datetime(MAX(changed_at)) DESC,
+                    CAST(chat_id AS INTEGER) DESC
+                LIMIT ?
+                """,
+                (
+                    threshold,
+                    threshold,
+                    threshold,
+                    limit,
+                ),
+            )
+            rows = await cursor.fetchall()
+        return [str(row[0]) for row in rows]
+
     async def counts(self) -> OpenLinesStoreCounts:
         async with aiosqlite.connect(self.database_path) as database:
             await _prepare_connection(database)

@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager, suppress
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -16,6 +18,9 @@ from app.services.bitrix_realtime_events import (
     ingest_bitrix_event,
 )
 from app.services.rop_scheduler_health import build_rop_scheduler_health
+from app.services.rop_sla_background_worker import (
+    run_rop_sla_background_worker,
+)
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -25,7 +30,37 @@ AuthorizationHeader = Annotated[str | None, Header()]
 
 configure_openai_runtime(settings)
 
-app = FastAPI(title=settings.app_name, version=settings.app_version)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    worker_task: asyncio.Task[None] | None = None
+
+    if settings.rop_sla_worker_enabled:
+        worker_task = asyncio.create_task(
+            run_rop_sla_background_worker(
+                settings
+            ),
+            name="rop-sla-background-worker",
+        )
+
+    try:
+        yield
+
+    finally:
+        if worker_task is not None:
+            worker_task.cancel()
+
+            with suppress(
+                asyncio.CancelledError
+            ):
+                await worker_task
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    lifespan=lifespan,
+)
 
 
 class AgentRequest(BaseModel):

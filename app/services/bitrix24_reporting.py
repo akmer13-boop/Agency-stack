@@ -369,7 +369,7 @@ def format_recent_deals(
             amount_text = f"{amount_text} {currency}"
 
         lines.append(
-            f"• #{deal_id} | воронка {category} | стадия {stage}\n"
+            f"• Сделка #{deal_id} | воронка {category} | стадия {stage}\n"
             f"  сумма: {amount_text} | "
             f"ответственный: {responsible_name(deal, users)}\n"
             f"  изменена: {modified}"
@@ -392,7 +392,7 @@ def format_demo_leads(
         source = _value(lead, "SOURCE_ID", "sourceId", default="не указан")
         modified = _value(lead, "DATE_MODIFY", "dateModify", default="нет даты")
         lines.append(
-            f"• #{lead_id} — {title}\n"
+            f"• Лид #{lead_id} — {title}\n"
             f"  статус: {status} | источник: {source}\n"
             f"  ответственный: {responsible_name(lead, users)} | "
             f"изменён: {modified}"
@@ -415,7 +415,7 @@ def format_stuck_deals(stuck_deals: list[StuckDeal], *, stale_days: int) -> str:
         deal_id = _value(item.deal, "ID", "id", default="?")
         stage = _value(item.deal, "STAGE_ID", "stageId", default="не указана")
         lines.append(
-            f"• #{deal_id} | стадия {stage} | "
+            f"• Сделка #{deal_id} | стадия {stage} | "
             f"без движения {item.inactive_days} дн.\n"
             f"  ответственный: {item.responsible_name}"
         )
@@ -423,9 +423,10 @@ def format_stuck_deals(stuck_deals: list[StuckDeal], *, stale_days: int) -> str:
     return "\n".join(lines)
 
 
-def _card_ids(items: list[dict[str, Any]]) -> str:
+def _card_ids(items: list[dict[str, Any]], card_type: str) -> str:
     return ", ".join(
-        f"#{_value(item, 'ID', 'id', default='?')}" for item in items[:30]
+        f"{card_type} #{_value(item, 'ID', 'id', default='?')}"
+        for item in items[:30]
     )
 
 
@@ -442,9 +443,9 @@ def format_unassigned_cards(
         f"• лиды: {len(leads)}",
     ]
     if deals:
-        lines.append(f"\nСделки: {_card_ids(deals)}")
+        lines.append(f"\nСделки: {_card_ids(deals, 'Сделка')}")
     if leads:
-        lines.append(f"\nЛиды: {_card_ids(leads)}")
+        lines.append(f"\nЛиды: {_card_ids(leads, 'Лид')}")
     lines.append("\nРасчёт выполнен локально. Данные в OpenAI не передавались.")
     return "\n".join(lines)
 

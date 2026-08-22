@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Literal
 
 from agents import FunctionTool, function_tool
@@ -22,6 +23,10 @@ from app.services.rop_analytics import (
     format_rop_risks,
     format_rop_today,
     format_rop_week,
+)
+from app.services.rop_b2c_problem_cards import (
+    build_and_format_b2c_problem_cards,
+    build_and_format_b2c_today_focus,
 )
 from app.services.rop_business_policy_registry import (
     build_business_policy_registry,
@@ -201,7 +206,7 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
 
     @function_tool
     async def get_rop_focus() -> str:
-        """Return today's deterministic focus-list from business-confirmed SLA stages."""
+        """Return the legacy all-pipeline focus-list, including non-B2C funnels."""
         report = await build_focus_report(
             settings.database_path,
             limit=settings.rop_focus_limit,
@@ -209,6 +214,31 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             excluded_stage_ids=settings.rop_excluded_stages,
         )
         return await _enrich_with_directory(settings, format_focus_report(report))
+
+    @function_tool
+    async def get_rop_b2c_today_focus(
+        limit: int = 5,
+    ) -> str:
+        """Return a clean current B2C intervention list with clickable deal cards.
+
+        Use this for B2C questions such as "what should I check today", "where should
+        the sales head intervene", or "which B2C deals require attention". It uses the
+        truthful Stage SLA layer, excludes B2B and other funnels, and omits opportunity,
+        currency, raw category/stage IDs and legacy CRITICAL labels. Stage SLA attention
+        proves that the stage control deadline passed; it does not prove that follow-up
+        or communication was absent.
+
+        Args:
+            limit: Number of priority B2C deal cards to return, from 1 to 10.
+        """
+        if limit < 1 or limit > 10:
+            return "limit должен быть от 1 до 10."
+
+        return await asyncio.to_thread(
+            build_and_format_b2c_today_focus,
+            settings,
+            limit=limit,
+        )
 
     @function_tool
     async def get_rop_deal(deal_id: int) -> str:
@@ -291,6 +321,47 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
             report,
             directory,
             timezone_name=settings.rop_timezone,
+        )
+
+    @function_tool
+    async def get_rop_b2c_problem_cards(
+        scope: Literal["leads", "deals", "all"] = "all",
+        manager_id: int | None = None,
+        max_managers: int = 5,
+        cards_per_manager: int = 3,
+    ) -> str:
+        """Return exact current B2C problem cards grouped by safely proven manager.
+
+        Use this tool when the user asks which exact leads or deals are problematic,
+        wants Bitrix24 card links, asks "what is wrong" by manager, or wants a drilldown
+        from the compact B2C Dashboard. Lead cards are truthful First Response SLA
+        breaches; deal cards are truthful Stage SLA attention items. The tool never
+        assigns unattributed First Response breaches to a manager and never exposes
+        client text, phone numbers, or the Bitrix webhook secret.
+
+        Args:
+            scope: leads for First Response lead cards, deals for Stage SLA deal cards,
+                or all for both entity types.
+            manager_id: Optional exact Bitrix24 manager ID to filter.
+            max_managers: Number of top managers to return, from 1 to 10.
+            cards_per_manager: Number of cards of each requested type, from 1 to 10.
+        """
+        if max_managers < 1 or max_managers > 10:
+            return "max_managers должен быть от 1 до 10."
+        if cards_per_manager < 1 or cards_per_manager > 10:
+            return "cards_per_manager должен быть от 1 до 10."
+
+        return await asyncio.to_thread(
+            build_and_format_b2c_problem_cards,
+            settings,
+            scope=scope,
+            manager_id=(
+                str(manager_id)
+                if manager_id is not None
+                else None
+            ),
+            max_managers=max_managers,
+            cards_per_manager=cards_per_manager,
         )
 
     @function_tool
@@ -457,9 +528,11 @@ def build_rop_function_tools(settings: Settings) -> list[FunctionTool]:
         get_rop_sla,
         get_rop_cycle_time,
         get_rop_focus,
+        get_rop_b2c_today_focus,
         get_rop_deal,
         get_rop_deal_activity,
         get_rop_leads,
+        get_rop_b2c_problem_cards,
         get_rop_lead_response_evidence,
         get_rop_openlines_response,
         get_rop_lead_response_trend,

@@ -615,7 +615,7 @@ def format_cycle_time_report(report: CycleTimeReport) -> str:
 def _format_focus_deal(item: FocusDeal) -> str:
     severity = "КРИТИЧНО" if item.severity == "critical" else "ВНИМАНИЕ"
     return (
-        f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
+        f"• [{severity}] Сделка #{item.deal_id} | {category_label(item.category_id)} · "
         f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
         f"{_money(item.opportunity)} {item.currency} | отв. ID {item.assigned_by_id} | "
         f"{item.rule_label}"

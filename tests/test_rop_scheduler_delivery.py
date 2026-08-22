@@ -20,10 +20,21 @@ async def test_scheduler_delivery_is_durable_across_ticks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_daily(_settings: Settings) -> str:
+    def fake_calendar_report(
+        _settings: Settings,
+        *,
+        kind,
+        period_key: str,
+    ) -> str:
+        assert kind.value == "daily"
+        assert period_key == "2026-08-11"
         return "daily report"
 
-    monkeypatch.setattr(scheduler_module, "build_rop_daily", fake_daily)
+    monkeypatch.setattr(
+        scheduler_module,
+        "build_rop_calendar_report",
+        fake_calendar_report,
+    )
 
     settings = Settings(
         _env_file=None,

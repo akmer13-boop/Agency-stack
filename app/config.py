@@ -72,6 +72,50 @@ class Settings(BaseSettings):
     bitrix24_sync_page_delay_seconds: float = Field(default=0.25, ge=0.0, le=5.0)
     bitrix24_sync_overlap_minutes: int = Field(default=5, ge=0, le=120)
     bitrix24_reconciliation_audit_path: str = ""
+    bitrix24_auto_sync_enabled: bool = False
+    bitrix24_auto_sync_poll_seconds: int = Field(
+        default=300,
+        ge=60,
+        le=3600,
+    )
+    bitrix24_auto_sync_health_path: str = "data/bitrix_auto_sync_health.json"
+    bitrix24_auto_sync_openlines_enabled: bool = False
+    bitrix24_auto_sync_openlines_max_crm_objects: int = Field(
+        default=200,
+        ge=1,
+        le=5000,
+    )
+    bitrix24_auto_sync_openlines_max_chats: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+    )
+    bitrix24_auto_sync_openlines_max_pages_per_chat: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+    )
+    bitrix24_auto_sync_voximplant_enabled: bool = False
+    bitrix24_auto_sync_voximplant_overlap_minutes: int = Field(
+        default=15,
+        ge=1,
+        le=1440,
+    )
+    bitrix24_auto_sync_voximplant_settle_minutes: int = Field(
+        default=2,
+        ge=0,
+        le=60,
+    )
+    bitrix24_auto_sync_voximplant_initial_lookback_days: int = Field(
+        default=120,
+        ge=1,
+        le=365,
+    )
+    bitrix24_auto_sync_voximplant_max_pages: int = Field(
+        default=500,
+        ge=1,
+        le=5000,
+    )
 
     bitrix_event_endpoint_enabled: bool = False
     bitrix_event_application_token: str = Field(default="", repr=False)
@@ -108,6 +152,28 @@ class Settings(BaseSettings):
     rop_scheduler_poll_seconds: int = Field(default=30, ge=5, le=3600)
     rop_scheduler_state_path: str = "data/rop_scheduler_state.json"
     rop_scheduler_health_path: str = "data/rop_scheduler_health.json"
+
+    rop_sla_worker_enabled: bool = False
+    rop_sla_worker_poll_seconds: int = Field(
+        default=5,
+        ge=1,
+        le=300,
+    )
+    rop_sla_worker_event_limit: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+    )
+    rop_sla_worker_deadline_limit: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+    )
+    rop_sla_worker_max_attempts: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+    )
 
     proxy_type: str = ""
     proxy_host: str = Field(default="", repr=False)

@@ -3,14 +3,20 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.enums import ParseMode
 
 from app.config import Settings
 from app.domain import AgentRoute, UserRole
 from app.services.agent_runner import AgentRunResult
+from app.services.routing import route_message
 from app.storage.conversation_store import ConversationStore
 from app.telegram.access import get_telegram_user_role, is_telegram_user_allowed
 from app.telegram.handlers import reset_handler, start_handler, text_handler
-from app.telegram.messages import resolve_user_message, split_telegram_text
+from app.telegram.messages import (
+    build_main_menu,
+    resolve_user_message,
+    split_telegram_text,
+)
 from app.telegram.rate_limit import UserRateLimiter
 
 
@@ -140,6 +146,64 @@ async def test_text_handler_routes_agent_and_saves_memory(
 
 
 @pytest.mark.asyncio
+async def test_text_handler_embeds_trusted_crm_link_in_card_number(
+    monkeypatch: pytest.MonkeyPatch,
+    conversation_store: ConversationStore,
+) -> None:
+    message = make_message(user_id=42, text="Покажи проблемный лид")
+    settings = make_settings(
+        telegram_manager_user_ids="42",
+        bitrix24_webhook_url=(
+            "https://b24.example.test/rest/7/supersecretcode/"
+        ),
+    )
+    rate_limiter = UserRateLimiter(0)
+
+    async def fake_execute_agent(
+        _message: str,
+        _settings: Settings,
+        **_kwargs,
+    ) -> AgentRunResult:
+        return AgentRunResult(
+            answer=(
+                "Проверь [Лид #123]"
+                "(https://b24.example.test/crm/lead/details/123/)"
+            ),
+            agent="Agency Stack Sales Manager",
+            route=AgentRoute.SALES_MANAGER,
+        )
+
+    class FakeTyping:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setattr(
+        "app.telegram.handlers.execute_agent",
+        fake_execute_agent,
+    )
+    monkeypatch.setattr(
+        "app.telegram.handlers.ChatActionSender.typing",
+        lambda **_kwargs: FakeTyping(),
+    )
+
+    await text_handler(
+        message,
+        settings,
+        rate_limiter,
+        conversation_store,
+    )
+
+    assert message.answer.await_args.args[0] == (
+        'Проверь <a href="https://b24.example.test/crm/lead/details/123/">'
+        "Лид #123</a>"
+    )
+    assert message.answer.await_args.kwargs["parse_mode"] is ParseMode.HTML
+
+
+@pytest.mark.asyncio
 async def test_reset_handler_clears_history(
     conversation_store: ConversationStore,
 ) -> None:
@@ -160,8 +224,36 @@ async def test_reset_handler_clears_history(
 
 
 def test_telegram_text_helpers() -> None:
-    assert resolve_user_message("📚 База знаний").startswith("Объясни")
+    recommendations = resolve_user_message(
+        "🤖 Рекомендации ИИ-РОПа"
+    )
+    attention_deals = resolve_user_message(
+        "🔥 Сделки, требующие внимания"
+    )
+
+    assert "реальные локальные данные CRM" in recommendations
+    assert "get_rop_b2c_today_focus" in recommendations
+    assert "именно в B2C" in recommendations
+    assert "трёх подтверждённых сигналов" in recommendations
+    assert "трёх управленческих рекомендаций" in recommendations
+    assert route_message(recommendations) is AgentRoute.SALES_MANAGER
+    assert "пяти приоритетных сделок" in attention_deals
+    assert "get_rop_b2c_today_focus" in attention_deals
+    assert "технические коды стадий" in attention_deals
+    assert route_message(attention_deals) is AgentRoute.DEAL_ANALYST
     assert resolve_user_message("Обычный запрос") == "Обычный запрос"
+
+    menu_labels = [
+        button.text
+        for row in build_main_menu().keyboard
+        for button in row
+    ]
+    assert menu_labels == [
+        "📊 ИИ-РОП",
+        "🤖 Рекомендации ИИ-РОПа",
+        "🔥 Сделки, требующие внимания",
+    ]
+    assert build_main_menu().input_field_placeholder == "Задайте вопрос ИИ-РОПу"
 
     chunks = split_telegram_text("12345 67890", chunk_size=7)
     assert chunks == ["12345", "67890"]

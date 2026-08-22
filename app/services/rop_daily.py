@@ -10,6 +10,9 @@ from app.services.rop_activity_risk import (
     format_activity_aware_risk_compact,
 )
 from app.services.rop_analytics import build_rop_snapshot
+from app.services.rop_b2c_first_response_truth import (
+    build_b2c_first_response_truth,
+)
 from app.services.rop_catalog import category_label, stage_label
 from app.services.rop_deal import build_deal_drilldown
 from app.services.rop_deal_evidence import build_deal_stage_evidence
@@ -89,6 +92,10 @@ async def _build_top_deal_context(
 
 
 async def build_rop_daily(settings: Settings) -> str:
+    first_response = build_b2c_first_response_truth(
+        settings.database_path
+    )
+
     snapshot = await build_rop_snapshot(
         settings.database_path,
         attention_days=settings.rop_attention_days,
@@ -122,13 +129,16 @@ async def build_rop_daily(settings: Settings) -> str:
     directory = await load_rop_directory(settings.database_path)
 
     month = snapshot.period("month")
-    lines = ["ИИ-РОП · Daily Brief", "Локальная read-only сводка для руководителя."]
+    lines = ["ИИ-РОП · Daily Brief", "Локальная сводка для руководителя · без записи в Bitrix."]
 
     if month is not None:
         lines.extend(
             [
                 "\nТекущий месяц:",
-                f"• новые лиды: {month.new_leads}",
+                f"• все лиды CRM: {first_response.all_leads_created}",
+                f"• подтверждённые B2C-лиды: {first_response.b2c_proven}",
+                f"• B2C не подтверждено: {first_response.unresolved}",
+                f"• исключено / вне B2C: {first_response.excluded_or_out_of_scope}",
                 f"• новые сделки: {month.new_deals}",
                 f"• WON / LOST: {month.won_deals} / {month.lost_deals}",
                 f"• конверсия закрытых: {_closed_conversion(month.won_deals, month.lost_deals)}",
@@ -140,15 +150,60 @@ async def build_rop_daily(settings: Settings) -> str:
             )
             lines.append(f"• сумма успешных WON: {won_amounts}")
 
-    lines.append("\nГде горит по SLA:")
+    attributed_first_response_breaches = max(
+        0,
+        first_response.breach
+        - first_response.unattributed_breaches,
+    )
+
+    lines.extend(
+        [
+            "\nFirst Response SLA · 15 бизнес-минут:",
+            (
+                f"• измерено: {first_response.measured} из "
+                f"{first_response.b2c_proven} "
+                f"({first_response.measured_share_percent:.1f}%)"
+            ),
+            f"• в SLA: {first_response.ok}",
+            f"• нарушение: {first_response.breach}",
+            f"• ещё открыто: {first_response.open}",
+            (
+                "• blocked / недостаточно evidence: "
+                f"{first_response.blocked}"
+            ),
+            (
+                "• соблюдение среди измеренных закрытых: "
+                f"{first_response.ok_share_closed_percent:.1f}% "
+                f"(n={first_response.closed_measured})"
+            ),
+            (
+                "• нарушений с безопасной атрибуцией менеджеру: "
+                f"{attributed_first_response_breaches}"
+            ),
+            (
+                "• нарушений без безопасной атрибуции: "
+                f"{first_response.unattributed_breaches}"
+            ),
+        ]
+    )
+
+    if first_response.blocked > 0:
+        lines.append(
+            "• blocked НЕ считается нарушением: "
+            "для этих кейсов недостаточно доказательств."
+        )
+
+    lines.append(
+        "\nAging-risk по текущим стадиям (НЕ Stage SLA):"
+    )
     if not sla:
-        lines.append("• критических измеряемых стадий не найдено")
+        lines.append("• aging-кандидатов по legacy-правилам не найдено")
     else:
         for item in sla[:4]:
             share = 100 * item.critical_count / item.active_count if item.active_count else 0
             lines.append(
                 f"• {category_label(item.rule.category_id)} · "
-                f"{stage_label(item.rule.stage_id)}: критично {item.critical_count} из "
+                f"{stage_label(item.rule.stage_id)}: aging-критично {item.critical_count} из "
                 f"{item.active_count} ({share:.1f}%)"
             )
 
@@ -159,18 +214,19 @@ async def build_rop_daily(settings: Settings) -> str:
         [item.deal_id for item in money[:3]],
     )
 
-    lines.append("\nСделки для вмешательства сегодня:")
+    lines.append("\nСделки для проверки по aging-risk:")
     if not money:
-        lines.append("• нет денежных SLA-кандидатов в текущем focus-list")
+        lines.append("• нет денежных aging-кандидатов в текущем focus-list")
     else:
         for item in money[:5]:
-            severity = "КРИТИЧНО" if item.severity == "critical" else "ВНИМАНИЕ"
+            severity = "AGING-КРИТИЧНО" if item.severity == "critical" else "AGING-ВНИМАНИЕ"
             context = top_context.get(item.deal_id)
             vitality_suffix = ""
             if context is not None:
                 vitality_suffix = " | " + format_deal_vitality_compact(context[1])
             lines.append(
-                f"• [{severity}] #{item.deal_id} | {category_label(item.category_id)} · "
+                f"• [{severity}] Сделка #{item.deal_id} | "
+                f"{category_label(item.category_id)} · "
                 f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
                 f"{_money(item.opportunity)} {item.currency} | "
                 f"{_responsible_label(directory, item.assigned_by_id)}{vitality_suffix}"
@@ -185,7 +241,10 @@ async def build_rop_daily(settings: Settings) -> str:
                 if context is None:
                     continue
                 risk, vitality = context
-                lines.append(f"• #{item.deal_id} | {format_activity_aware_risk_compact(risk)}")
+                lines.append(
+                    f"• Сделка #{item.deal_id} | "
+                    f"{format_activity_aware_risk_compact(risk)}"
+                )
                 lines.append(f"  {format_deal_vitality_compact(vitality)}")
         lines.append(
             "• дни с последней коммуникации являются фактом, а не отдельным SLA: "
@@ -218,16 +277,16 @@ async def build_rop_daily(settings: Settings) -> str:
         reverse=True,
     )
 
-    lines.append("\nКого разбирать сегодня по stage-specific SLA:")
+    lines.append("\nКого разбирать по aging-risk (НЕ Stage SLA):")
     if not manager_candidates:
         lines.append("• менеджеров с SLA-критичными карточками не найдено")
     else:
         for manager_id, counters, manager_stat in manager_candidates[:5]:
             if manager_stat is None:
                 lines.append(
-                    f"• {_employee(directory, manager_id)} | SLA-критично "
+                    f"• {_employee(directory, manager_id)} | aging-критично "
                     f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
-                    f"SLA-внимание (без критичных) {counters['attention']}"
+                    f"aging-внимание (без критичных) {counters['attention']}"
                 )
                 continue
 
@@ -238,14 +297,14 @@ async def build_rop_daily(settings: Settings) -> str:
                 else f"закрытых {closed}, выборка мала"
             )
             lines.append(
-                f"• {_employee(directory, manager_id)} | SLA-критично "
+                f"• {_employee(directory, manager_id)} | aging-критично "
                 f"{counters['critical']} | с суммой >1 {counters['critical_money']} | "
-                f"SLA-внимание (без критичных) {counters['attention']} | "
+                f"aging-внимание (без критичных) {counters['attention']} | "
                 f"WON/LOST {manager_stat.month_won}/{manager_stat.month_lost} | {sample}"
             )
 
     if excluded_sla_by_actor:
-        lines.append("\nИсключённая SLA-атрибуция · НЕ менеджеры:")
+        lines.append("\nИсключённая aging-атрибуция · НЕ менеджеры:")
         for actor_id, counters in sorted(
             excluded_sla_by_actor.items(),
             key=lambda item: (
@@ -256,20 +315,20 @@ async def build_rop_daily(settings: Settings) -> str:
             reverse=True,
         )[:5]:
             lines.append(
-                f"• actor ID {actor_id} | SLA-критично {counters['critical']} | "
+                f"• actor ID {actor_id} | aging-критично {counters['critical']} | "
                 f"с суммой >1 {counters['critical_money']} | "
-                f"SLA-внимание {counters['attention']}"
+                f"aging-внимание {counters['attention']}"
             )
 
     lines.extend(
         [
             "\nCRM hygiene:",
-            f"• SLA-кандидатов с нулевой/технической суммой ≤1: {focus.hygiene_candidates}",
+            f"• aging-кандидатов с нулевой/технической суммой ≤1: {focus.hygiene_candidates}",
         ]
     )
     for item in hygiene[:3]:
         lines.append(
-            f"• #{item.deal_id} | {category_label(item.category_id)} · "
+            f"• Сделка #{item.deal_id} | {category_label(item.category_id)} · "
             f"{stage_label(item.stage_id)} | {item.age_days} дн. | "
             f"{_responsible_label(directory, item.assigned_by_id)}"
         )
@@ -294,14 +353,14 @@ async def build_rop_daily(settings: Settings) -> str:
         manager_id, counters, _manager_stat = manager_candidates[0]
         lines.append(
             f"2. Разобрать портфель {_employee(directory, manager_id)}: "
-            f"SLA-критично {counters['critical']}, из них с суммой >1 "
+            f"aging-критично {counters['critical']}, из них с суммой >1 "
             f"{counters['critical_money']}."
         )
     if sla:
         top_sla = sla[0]
         lines.append(
             f"3. Снять хвост стадии {category_label(top_sla.rule.category_id)} · "
-            f"{stage_label(top_sla.rule.stage_id)}: критично {top_sla.critical_count}."
+            f"{stage_label(top_sla.rule.stage_id)}: aging-критично {top_sla.critical_count}."
         )
 
     lines.append(
@@ -310,9 +369,9 @@ async def build_rop_daily(settings: Settings) -> str:
         "не попадает в блок 'Кого разбирать' и показывается отдельно как excluded attribution."
     )
     lines.append(
-        "Manager ranking в этом Daily Brief использует только stage-specific SLA. "
-        "SLA-внимание означает жёлтую зону и не включает уже критичные карточки. "
-        "Общий aging 3+/5+ из /rop_managers не считается SLA конкретной стадии."
+        "Manager ranking в этом блоке использует legacy aging-risk, а не Stage SLA. "
+        "aging-внимание означает жёлтую зону и не включает уже aging-критичные карточки. "
+        "Общий aging 3+/5+ из /rop_managers не считается Stage SLA конкретной стадии."
     )
     lines.append(
         "Deal vitality не является вероятностью продажи и не закрывает сделки автоматически. "
