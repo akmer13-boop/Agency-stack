@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -246,25 +246,267 @@ def build_b2c_first_response_truth(
             "openlines_messages",
         }
 
+        # A direct lead link is the strongest OpenLines evidence and must
+        # preserve the legacy lead-level result. Secondary CRM links are
+        # considered only when the chat has no direct lead link.
+        resolved_chat_leads: dict[
+            str,
+            set[int],
+        ] = {}
+
+        ambiguous_chat_leads: dict[
+            str,
+            set[int],
+        ] = {}
+
         if required_openlines.issubset(
             tables
         ):
+            entity_to_leads: defaultdict[
+                tuple[str, str],
+                set[int],
+            ] = defaultdict(set)
+
+            for lead_id in b2c_leads:
+                entity_to_leads[
+                    ("lead", str(lead_id))
+                ].add(lead_id)
+
+            deal_link_rows = connection.execute(
+                """
+                SELECT entity_id, payload_json
+                FROM crm_active_entities
+                WHERE entity_type = 'deal'
+                """
+            ).fetchall()
+
+            for deal_row in deal_link_rows:
+                try:
+                    deal_payload = json.loads(
+                        deal_row["payload_json"]
+                    )
+                except (
+                    TypeError,
+                    json.JSONDecodeError,
+                ):
+                    continue
+
+                if not isinstance(
+                    deal_payload,
+                    dict,
+                ):
+                    continue
+
+                try:
+                    lead_id = int(
+                        str(
+                            deal_payload.get(
+                                "LEAD_ID"
+                            )
+                            or ""
+                        )
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    continue
+
+                if lead_id not in b2c_leads:
+                    continue
+
+                deal_id = str(
+                    deal_row["entity_id"]
+                ).strip()
+
+                if deal_id:
+                    entity_to_leads[
+                        ("deal", deal_id)
+                    ].add(lead_id)
+
+                for key in (
+                    "CONTACT_ID",
+                    "CONTACT_IDS",
+                ):
+                    raw_contacts = (
+                        deal_payload.get(key)
+                    )
+
+                    if raw_contacts in (
+                        None,
+                        "",
+                    ):
+                        continue
+
+                    if isinstance(
+                        raw_contacts,
+                        (
+                            list,
+                            tuple,
+                            set,
+                        ),
+                    ):
+                        contacts = raw_contacts
+                    else:
+                        contacts = (
+                            raw_contacts,
+                        )
+
+                    for raw_contact in contacts:
+                        contact_id = str(
+                            raw_contact
+                            or ""
+                        ).strip()
+
+                        if contact_id:
+                            entity_to_leads[
+                                (
+                                    "contact",
+                                    contact_id,
+                                )
+                            ].add(
+                                lead_id
+                            )
+
+                company_id = str(
+                    deal_payload.get(
+                        "COMPANY_ID"
+                    )
+                    or ""
+                ).strip()
+
+                if company_id:
+                    entity_to_leads[
+                        (
+                            "company",
+                            company_id,
+                        )
+                    ].add(
+                        lead_id
+                    )
+
+            chat_buckets: defaultdict[
+                str,
+                defaultdict[
+                    str,
+                    set[int],
+                ],
+            ] = defaultdict(
+                lambda: defaultdict(set)
+            )
+
+            link_rows = connection.execute(
+                """
+                SELECT
+                    chat_id,
+                    entity_type,
+                    entity_id
+                FROM openlines_crm_links
+                """
+            ).fetchall()
+
+            for link_row in link_rows:
+                chat_id = str(
+                    link_row["chat_id"]
+                ).strip()
+                entity_type = str(
+                    link_row["entity_type"]
+                    or ""
+                ).strip().lower()
+                entity_id = str(
+                    link_row["entity_id"]
+                    or ""
+                ).strip()
+
+                if (
+                    not chat_id
+                    or entity_type
+                    not in {
+                        "lead",
+                        "deal",
+                        "contact",
+                        "company",
+                    }
+                    or not entity_id
+                ):
+                    continue
+
+                candidates = (
+                    entity_to_leads.get(
+                        (
+                            entity_type,
+                            entity_id,
+                        ),
+                        set(),
+                    )
+                )
+
+                if candidates:
+                    chat_buckets[
+                        chat_id
+                    ][
+                        entity_type
+                    ].update(
+                        candidates
+                    )
+
+            for (
+                chat_id,
+                buckets,
+            ) in chat_buckets.items():
+                direct_leads = set(
+                    buckets.get(
+                        "lead",
+                        set(),
+                    )
+                )
+
+                if direct_leads:
+                    # Preserve every direct lead relation exactly as the
+                    # previous lead-only JOIN did. A deal/contact/company
+                    # relation is not allowed to steal or downgrade it.
+                    resolved_chat_leads[
+                        chat_id
+                    ] = direct_leads
+                    continue
+
+                secondary_leads: set[int] = set()
+
+                for entity_type in (
+                    "deal",
+                    "contact",
+                    "company",
+                ):
+                    secondary_leads.update(
+                        buckets.get(
+                            entity_type,
+                            set(),
+                        )
+                    )
+
+                if len(secondary_leads) == 1:
+                    resolved_chat_leads[
+                        chat_id
+                    ] = secondary_leads
+                elif secondary_leads:
+                    # Conflicting secondary links are evidence that a
+                    # response may exist, but not proof for one lead.
+                    ambiguous_chat_leads[
+                        chat_id
+                    ] = secondary_leads
+
             message_rows = connection.execute(
                 """
                 SELECT
-                    link.entity_id AS lead_id,
-                    msg.message_id,
-                    msg.sent_at,
-                    msg.sender_directory_user_id
-                FROM openlines_crm_links AS link
-                JOIN openlines_messages AS msg
-                  ON msg.chat_id = link.chat_id
-                WHERE link.entity_type = 'lead'
-                  AND msg.sender_role = 'manager'
-                  AND
-                      msg.sender_directory_user_id
+                    chat_id,
+                    message_id,
+                    sent_at,
+                    sender_directory_user_id
+                FROM openlines_messages
+                WHERE sender_role = 'manager'
+                  AND sender_directory_user_id
                       IS NOT NULL
-                  AND msg.sent_at IS NOT NULL
+                  AND sent_at IS NOT NULL
                 """
             ).fetchall()
         else:
@@ -278,62 +520,91 @@ def build_b2c_first_response_truth(
             ],
         ] = {}
 
+        ambiguous_messages_by_lead: defaultdict[
+            int,
+            list[datetime],
+        ] = defaultdict(list)
+
         for row in message_rows:
-            try:
-                lead_id = int(
-                    row["lead_id"]
-                )
-            except (
-                TypeError,
-                ValueError,
-            ):
-                continue
-
-            lead = b2c_leads.get(
-                lead_id
+            chat_id = str(
+                row["chat_id"]
             )
-
-            if lead is None:
-                continue
 
             sent = _dt(
                 row["sent_at"]
             )
 
-            created = lead[
-                "created"
-            ]
-
-            if not isinstance(
-                created,
-                datetime,
-            ):
+            if sent is None:
                 continue
 
-            if (
-                sent is None
-                or sent < created
+            for lead_id in resolved_chat_leads.get(
+                chat_id,
+                set(),
             ):
-                continue
-
-            current = first_message.get(
-                lead_id
-            )
-
-            if (
-                current is None
-                or sent < current[0]
-            ):
-                first_message[
+                lead = b2c_leads.get(
                     lead_id
-                ] = (
-                    sent,
-                    str(
-                        row[
-                            "sender_directory_user_id"
-                        ]
-                    ),
                 )
+
+                if lead is None:
+                    continue
+
+                created = lead[
+                    "created"
+                ]
+
+                if (
+                    not isinstance(
+                        created,
+                        datetime,
+                    )
+                    or sent < created
+                ):
+                    continue
+
+                current = first_message.get(
+                    lead_id
+                )
+
+                if (
+                    current is None
+                    or sent < current[0]
+                ):
+                    first_message[
+                        lead_id
+                    ] = (
+                        sent,
+                        str(
+                            row[
+                                "sender_directory_user_id"
+                            ]
+                        ),
+                    )
+
+            for lead_id in ambiguous_chat_leads.get(
+                chat_id,
+                set(),
+            ):
+                lead = b2c_leads.get(
+                    lead_id
+                )
+
+                if lead is None:
+                    continue
+
+                created = lead[
+                    "created"
+                ]
+
+                if (
+                    isinstance(
+                        created,
+                        datetime,
+                    )
+                    and sent >= created
+                ):
+                    ambiguous_messages_by_lead[
+                        lead_id
+                    ].append(sent)
 
         vox_run_id = None
         vox_start = None
@@ -370,10 +641,68 @@ def build_b2c_first_response_truth(
                     row["window_end"]
                 )
 
-        activity_to_lead: dict[
-            str,
-            int,
-        ] = {}
+        owner_type_to_entity = {
+            "1": "LEAD",
+            "2": "DEAL",
+            "3": "CONTACT",
+            "4": "COMPANY",
+        }
+
+        deal_to_lead: dict[str, int] = {}
+        contact_to_leads: defaultdict[str, set[int]] = defaultdict(set)
+        company_to_leads: defaultdict[str, set[int]] = defaultdict(set)
+
+        deal_rows = connection.execute(
+            """
+            SELECT entity_id, payload_json
+            FROM crm_active_entities
+            WHERE entity_type = 'deal'
+            """
+        ).fetchall()
+
+        for row in deal_rows:
+            try:
+                deal = json.loads(row["payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+
+            if not isinstance(deal, dict):
+                continue
+
+            try:
+                lead_id = int(str(deal.get("LEAD_ID") or ""))
+            except (TypeError, ValueError):
+                continue
+
+            if lead_id not in b2c_leads:
+                continue
+
+            deal_id = str(row["entity_id"])
+            deal_to_lead[deal_id] = lead_id
+
+            for key in ("CONTACT_ID", "CONTACT_IDS"):
+                raw_contacts = deal.get(key)
+
+                if raw_contacts in (None, ""):
+                    continue
+
+                if isinstance(raw_contacts, (list, tuple, set)):
+                    contacts = raw_contacts
+                else:
+                    contacts = (raw_contacts,)
+
+                for raw_contact in contacts:
+                    contact_id = str(raw_contact or "").strip()
+
+                    if contact_id:
+                        contact_to_leads[contact_id].add(lead_id)
+
+            company_id = str(deal.get("COMPANY_ID") or "").strip()
+
+            if company_id:
+                company_to_leads[company_id].add(lead_id)
+
+        activity_owner: dict[str, tuple[str, str]] = {}
 
         activity_rows = connection.execute(
             """
@@ -382,91 +711,130 @@ def build_b2c_first_response_truth(
                 CAST(
                     json_extract(
                         payload_json,
+                        '$.OWNER_TYPE_ID'
+                    ) AS TEXT
+                ) AS owner_type_id,
+                CAST(
+                    json_extract(
+                        payload_json,
                         '$.OWNER_ID'
-                    )
-                    AS TEXT
+                    ) AS TEXT
                 ) AS owner_id
             FROM crm_active_entities
             WHERE entity_type = 'activity'
-              AND CAST(
-                    json_extract(
-                        payload_json,
-                        '$.OWNER_TYPE_ID'
-                    )
-                    AS TEXT
-                  ) = '1'
             """
         ).fetchall()
 
         for row in activity_rows:
-            owner_id = str(
-                row["owner_id"]
-                or ""
+            entity_type = owner_type_to_entity.get(
+                str(row["owner_type_id"] or "")
             )
+            entity_id = str(row["owner_id"] or "").strip()
 
-            if owner_id.isdigit():
-                activity_to_lead[
-                    str(
-                        row[
-                            "entity_id"
-                        ]
-                    )
-                ] = int(
-                    owner_id
+            if entity_type and entity_id:
+                activity_owner[str(row["entity_id"])] = (
+                    entity_type,
+                    entity_id,
                 )
 
-        calls_by_lead: dict[
-            int,
-            list[datetime],
-        ] = {}
+        def candidate_leads(
+            entity_type: str,
+            entity_id: str,
+        ) -> set[int]:
+            entity_type = entity_type.strip().upper()
+            entity_id = entity_id.strip()
+
+            if not entity_type or not entity_id:
+                return set()
+
+            if entity_type == "LEAD":
+                try:
+                    lead_id = int(entity_id)
+                except (TypeError, ValueError):
+                    return set()
+
+                return {lead_id} if lead_id in b2c_leads else set()
+
+            if entity_type == "DEAL":
+                lead_id = deal_to_lead.get(entity_id)
+                return {lead_id} if lead_id is not None else set()
+
+            if entity_type == "CONTACT":
+                return set(
+                    contact_to_leads.get(
+                        entity_id,
+                        set(),
+                    )
+                )
+
+            if entity_type == "COMPANY":
+                return set(
+                    company_to_leads.get(
+                        entity_id,
+                        set(),
+                    )
+                )
+
+            return set()
+
+        calls_by_lead: dict[int, list[datetime]] = {}
 
         if (
             vox_run_id is not None
-            and
-            "rop_voximplant_statistic_facts"
-            in tables
+            and "rop_voximplant_statistic_facts" in tables
         ):
             call_rows = connection.execute(
                 """
                 SELECT
                     call_start_at,
-                    crm_activity_id
-                FROM
-                    rop_voximplant_statistic_facts
+                    crm_activity_id,
+                    crm_entity_type,
+                    crm_entity_id
+                FROM rop_voximplant_statistic_facts
                 WHERE last_seen_run_id = ?
                   AND call_failed_code = '200'
                 """,
-                (
-                    vox_run_id,
-                ),
+                (vox_run_id,),
             ).fetchall()
 
             for row in call_rows:
-                lead_id = activity_to_lead.get(
-                    str(
-                        row[
-                            "crm_activity_id"
-                        ]
-                        or ""
+                candidates: set[int] = set()
+
+                candidates.update(
+                    candidate_leads(
+                        str(row["crm_entity_type"] or ""),
+                        str(row["crm_entity_id"] or ""),
                     )
                 )
 
-                if lead_id is None:
+                activity_key = activity_owner.get(
+                    str(row["crm_activity_id"] or "")
+                )
+
+                if activity_key is not None:
+                    candidates.update(
+                        candidate_leads(
+                            activity_key[0],
+                            activity_key[1],
+                        )
+                    )
+
+                if not candidates:
                     continue
 
-                started = _dt(
-                    row["call_start_at"]
-                )
+                started = _dt(row["call_start_at"])
 
                 if started is None:
                     continue
 
-                calls_by_lead.setdefault(
-                    lead_id,
-                    [],
-                ).append(
-                    started
-                )
+                # Conservative evidence rule:
+                # if one successful call can plausibly belong to several
+                # B2C leads, protect every candidate from a false breach.
+                for lead_id in candidates:
+                    calls_by_lead.setdefault(
+                        lead_id,
+                        [],
+                    ).append(started)
 
         result = Counter()
 
@@ -530,6 +898,26 @@ def build_b2c_first_response_truth(
 
                     continue
 
+                ambiguous_message = any(
+                    created
+                    <= message_at
+                    <= response_at
+                    for message_at in
+                    ambiguous_messages_by_lead.get(
+                        lead_id,
+                        [],
+                    )
+                )
+
+                if ambiguous_message:
+                    result["blocked"] += 1
+
+                    blockers[
+                        "openlines_crm_link_ambiguous"
+                    ] += 1
+
+                    continue
+
                 ambiguous_call = any(
                     created
                     <= call_start
@@ -570,6 +958,26 @@ def build_b2c_first_response_truth(
 
                 blockers[
                     "call_coverage_missing_no_message"
+                ] += 1
+
+                continue
+
+            ambiguous_message = any(
+                created
+                <= message_at
+                <= vox_end
+                for message_at in
+                ambiguous_messages_by_lead.get(
+                    lead_id,
+                    [],
+                )
+            )
+
+            if ambiguous_message:
+                result["blocked"] += 1
+
+                blockers[
+                    "openlines_crm_link_ambiguous"
                 ] += 1
 
                 continue
